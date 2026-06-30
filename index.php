@@ -123,8 +123,8 @@ function fetchPageUnreadCount(string $pageId, string $token): array
             return ['unread' => 0, 'error' => $msg];
         }
         foreach ($res['data']['data'] ?? [] as $conv) {
-            $count = (int)($conv['unread_count'] ?? 0);
-            if ($count > 0) $unread += $count;
+            // Count conversations, not messages — matches Business inbox unread counter
+            if ((int)($conv['unread_count'] ?? 0) > 0) $unread++;
         }
         $url = $res['data']['paging']['next'] ?? null;
     }
@@ -249,7 +249,7 @@ function buildTelegramMessage(array $results, string $timezone): string
         $inboxUrl  = 'https://business.facebook.com/latest/inbox/messenger?asset_id=' . urlencode($page['id']);
         $lines[]   = '';
         $lines[]   = '📄 <b>' . htmlspecialchars($page['name']) . '</b>';
-        $lines[]   = '   💬 ' . $page['unread_count'] . ' unread messages';
+        $lines[]   = '   💬 ' . $page['unread_count'] . ' unread conversation(s)';
         $lines[]   = '   🔗 <a href="' . $inboxUrl . '">Open Inbox</a>';
     }
 
@@ -981,7 +981,7 @@ function renderDashboard(array $s): void
 <div class="card">
   <div class="ct">System Status</div>
   <div class="sr">
-    <div class="stat"><div class="sv"><?= $totalUnread ?></div><div class="sl">Total Unread Messages</div></div>
+    <div class="stat"><div class="sv"><?= $totalUnread ?></div><div class="sl">Unread Conversations</div></div>
     <div class="stat"><div class="sv"><?= count($s['pages'] ?? []) ?></div><div class="sl">Pages Monitored</div></div>
     <div class="stat"><div class="sv"><?= $interval ?>m</div><div class="sl">Check Interval</div></div>
     <div class="stat"><div class="sv"><?= $statusBadge ?></div><div class="sl">Notification Status</div></div>
