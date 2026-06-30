@@ -70,10 +70,11 @@ function httpGet(string $url): array
 {
     $ch = curl_init($url);
     curl_setopt_array($ch, [
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT        => 8,
-        CURLOPT_SSL_VERIFYPEER => false,
-        CURLOPT_USERAGENT      => 'UnreadAlert/1.0',
+        CURLOPT_RETURNTRANSFER  => true,
+        CURLOPT_TIMEOUT         => 8,
+        CURLOPT_CONNECTTIMEOUT  => 5,
+        CURLOPT_SSL_VERIFYPEER  => false,
+        CURLOPT_USERAGENT       => 'UnreadAlert/1.0',
     ]);
     $body  = curl_exec($ch);
     $code  = curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -1016,13 +1017,16 @@ function renderDashboard(array $s): void
 function runNow() {
   const st = document.getElementById('runSt');
   const btn = document.querySelector('button[onclick="runNow()"]');
-  st.className = 'st loading'; st.textContent = 'Running check — please wait (up to 1 minute)...';
+  st.className = 'st loading'; st.textContent = 'Running check — please wait...';
   if (btn) btn.disabled = true;
   let elapsed = 0;
   const timer = setInterval(() => { elapsed++; st.textContent = 'Running check... (' + elapsed + 's)'; }, 1000);
-  fetch('<?= htmlspecialchars($base) ?>?action=run&key=<?= $cronKey ?>')
+  const controller = new AbortController();
+  const fetchTimeout = setTimeout(() => controller.abort(), 120000);
+  fetch('<?= htmlspecialchars($base) ?>?action=run&key=<?= $cronKey ?>', {signal: controller.signal})
     .then(r => r.json())
     .then(d => {
+      clearTimeout(fetchTimeout);
       clearInterval(timer);
       if (btn) btn.disabled = false;
       st.className = 'st ' + (d.ok ? 'success' : 'error');
@@ -1030,10 +1034,12 @@ function runNow() {
       if (d.ok) setTimeout(() => location.reload(), 2000);
     })
     .catch(() => {
+      clearTimeout(fetchTimeout);
       clearInterval(timer);
       if (btn) btn.disabled = false;
-      st.className = 'st error';
-      st.textContent = '❌ Request timed out. Check cron log or try again.';
+      st.className = 'st loading';
+      st.textContent = '⏳ Check is running in background (' + elapsed + 's). Refresh in 1 minute to see results.';
+      setTimeout(() => location.reload(), 60000);
     });
 }
 </script>
