@@ -645,7 +645,7 @@ function loadDone() {
   const cronKey = document.getElementById('cronKey').value;
   const apiKey  = document.getElementById('apiKey').value;
   document.getElementById('cronCmd').childNodes[0].textContent =
-    '*/' + iv + ' * * * * curl "' + BASE + '?action=run&key=' + cronKey + '"';
+    '*/' + iv + ' * * * * /usr/bin/curl -s "' + BASE + '?action=run&key=' + cronKey + '"';
   document.getElementById('apiUrl').childNodes[0].textContent =
     BASE + '?action=api&key=' + apiKey;
 }
@@ -938,7 +938,7 @@ function renderSettingsPage(array $s): void
         $interval = (int)($s['check_interval'] ?? 15);
         $alwaysOn = !empty($oh['always_on']);
         $zones    = ['Asia/Dhaka','Asia/Kolkata','Asia/Karachi','Asia/Dubai','Europe/London','America/New_York','America/Los_Angeles','UTC'];
-        $cronCmd  = '*/' . $interval . ' * * * * curl "' . $base . '?action=run&key=' . ($s['cron_key'] ?? '') . '"';
+        $cronCmd  = '*/' . $interval . ' * * * * /usr/bin/curl -s "' . $base . '?action=run&key=' . ($s['cron_key'] ?? '') . '"';
         $apiUrl   = $base . '?action=api&key=' . ($s['api_key'] ?? '');
         ?>
 <h1>Settings</h1>
