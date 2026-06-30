@@ -110,7 +110,7 @@ function fetchPageUnreadCount(string $pageId, string $token): array
 {
     $unread = 0;
     $url    = META_API_BASE . "/{$pageId}/conversations"
-            . "?platform=messenger&fields=unread_count&limit=100"
+            . "?platform=messenger&folder=inbox&fields=unread_count&limit=100"
             . "&access_token=" . urlencode($token);
 
     $firstRes = null;
