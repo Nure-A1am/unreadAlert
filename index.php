@@ -345,6 +345,17 @@ function isWithinOfficeHours(array $oh): bool
 
 // ─── CRON RUNNER ─────────────────────────────────────────────
 
+function sendEarlyResponse(array $data): void
+{
+    while (ob_get_level() > 0) ob_end_clean();
+    header('Content-Type: application/json; charset=utf-8');
+    header('Connection: close');
+    $body = json_encode($data, JSON_UNESCAPED_UNICODE);
+    header('Content-Length: ' . strlen($body));
+    echo $body;
+    flush();
+}
+
 function handleRun(array $settings): void
 {
     set_time_limit(300);
@@ -364,34 +375,27 @@ function handleRun(array $settings): void
         jsonResponse(['ok' => false, 'message' => 'No pages configured. Add pages in Settings.']);
     }
 
+    // Close browser connection immediately — continue in background
+    sendEarlyResponse(['ok' => true, 'message' => 'Check started (' . count($pages) . ' pages). Refreshing...', 'background' => true]);
+
     $results = fetchAllPagesUnread($pages);
 
     $errors = array_filter(array_column($results, 'error'));
-    if (!empty($errors) && count($errors) === count($results)) {
-        jsonResponse(['ok' => false, 'message' => 'Facebook API error: ' . reset($errors), 'results' => $results]);
-    }
-
     $tz = $settings['office_hours']['timezone'] ?? 'Asia/Dhaka';
     $settings['last_result'] = $results;
     $settings['last_check']  = (new DateTime('now', new DateTimeZone($tz)))->format(DateTime::ATOM);
     saveSettings($settings);
 
+    if (!empty($errors) && count($errors) === count($results)) return;
+
     $message = buildTelegramMessage($results, $tz);
-    if (empty($message)) {
-        jsonResponse(['ok' => true, 'message' => 'No unread messages, notification skipped', 'results' => $results]);
-    }
+    if (empty($message)) return;
 
     $tg      = $settings['telegram'] ?? [];
     $chatIds = getChatIds($tg);
-    $lastSent = ['ok' => false, 'message' => 'No chat IDs configured'];
     foreach ($chatIds as $chatId) {
-        $lastSent = sendTelegramMessage($tg['bot_token'] ?? '', $chatId, $message);
+        sendTelegramMessage($tg['bot_token'] ?? '', $chatId, $message);
     }
-    jsonResponse([
-        'ok'      => $lastSent['ok'],
-        'message' => $lastSent['ok'] ? 'Alert sent to ' . count($chatIds) . ' recipient(s)' : $lastSent['message'],
-        'results' => $results,
-    ]);
 }
 
 // ─── REST API ────────────────────────────────────────────────
@@ -1029,6 +1033,12 @@ function runNow() {
       clearTimeout(fetchTimeout);
       clearInterval(timer);
       if (btn) btn.disabled = false;
+      if (d.background) {
+        st.className = 'st loading';
+        st.textContent = '⏳ ' + d.message;
+        setTimeout(() => location.reload(), 30000);
+        return;
+      }
       st.className = 'st ' + (d.ok ? 'success' : 'error');
       st.textContent = d.ok ? '✅ ' + d.message : '❌ ' + d.message;
       if (d.ok) setTimeout(() => location.reload(), 2000);
@@ -1038,8 +1048,8 @@ function runNow() {
       clearInterval(timer);
       if (btn) btn.disabled = false;
       st.className = 'st loading';
-      st.textContent = '⏳ Check is running in background (' + elapsed + 's). Refresh in 1 minute to see results.';
-      setTimeout(() => location.reload(), 60000);
+      st.textContent = '⏳ Running in background. Refreshing in 30s...';
+      setTimeout(() => location.reload(), 30000);
     });
 }
 </script>
