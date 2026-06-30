@@ -212,6 +212,122 @@ function handleTestTelegram(): void
     jsonResponse(sendTelegramMessage($botToken, $channelId, $msg));
 }
 
+// ─── OFFICE HOURS ────────────────────────────────────────────
+
+function isWithinOfficeHours(array $oh): bool
+{
+    if (!empty($oh['always_on'])) return true;
+    $tz      = new DateTimeZone($oh['timezone'] ?? 'Asia/Dhaka');
+    $current = (new DateTime('now', $tz))->format('H:i');
+    return $current >= ($oh['start'] ?? '09:00') && $current <= ($oh['end'] ?? '18:00');
+}
+
+// ─── CRON RUNNER ─────────────────────────────────────────────
+
+function handleRun(array $settings): void
+{
+    if (!verifyKey($_GET['key'] ?? '', $settings['cron_key'] ?? '')) {
+        jsonResponse(['ok' => false, 'message' => 'Unauthorized'], 401);
+    }
+
+    $oh = $settings['office_hours'] ?? ['always_on' => true];
+    if (!isWithinOfficeHours($oh)) {
+        jsonResponse(['ok' => true, 'message' => 'Outside office hours, skipped']);
+    }
+
+    $results = fetchAllPagesUnread($settings['pages'] ?? []);
+
+    $tz = $settings['office_hours']['timezone'] ?? 'Asia/Dhaka';
+    $settings['last_result'] = $results;
+    $settings['last_check']  = (new DateTime('now', new DateTimeZone($tz)))->format(DateTime::ATOM);
+    saveSettings($settings);
+
+    $message = buildTelegramMessage($results, $tz);
+    if (empty($message)) {
+        jsonResponse(['ok' => true, 'message' => 'No unread messages, notification skipped', 'results' => $results]);
+    }
+
+    $tg   = $settings['telegram'] ?? [];
+    $sent = sendTelegramMessage($tg['bot_token'] ?? '', $tg['channel_id'] ?? '', $message);
+    jsonResponse([
+        'ok'      => $sent['ok'],
+        'message' => $sent['ok'] ? 'Alert sent successfully' : $sent['message'],
+        'results' => $results,
+    ]);
+}
+
+// ─── REST API ────────────────────────────────────────────────
+
+function handleApi(array $settings): void
+{
+    if (!verifyKey($_GET['key'] ?? '', $settings['api_key'] ?? '')) {
+        jsonResponse(['status' => 'error', 'message' => 'Unauthorized'], 401);
+    }
+
+    $oh     = $settings['office_hours'] ?? ['always_on' => true];
+    $cached = $settings['last_result'] ?? [];
+
+    $pages = array_map(fn($r) => [
+        'id'           => $r['id'],
+        'name'         => $r['name'],
+        'unread_count' => (int)($r['unread_count'] ?? 0),
+        'inbox_url'    => 'https://business.facebook.com/latest/inbox/messenger?asset_id=' . urlencode($r['id']),
+    ], $cached);
+
+    jsonResponse([
+        'status'              => 'ok',
+        'checked_at'          => $settings['last_check'] ?? null,
+        'office_hours_active' => isWithinOfficeHours($oh),
+        'total_unread'        => array_sum(array_column($pages, 'unread_count')),
+        'pages'               => $pages,
+    ]);
+}
+
+// ─── SAVE & UTILS ────────────────────────────────────────────
+
+function handleSave(): void
+{
+    $existing = loadSettings();
+
+    $pages = [];
+    foreach ($_POST['page_id'] ?? [] as $i => $id) {
+        $id    = trim($id);
+        $name  = trim($_POST['page_name'][$i] ?? '');
+        $token = trim($_POST['page_token'][$i] ?? '');
+        if ($id && $name && $token) {
+            $pages[] = ['id' => $id, 'name' => $name, 'token' => $token];
+        }
+    }
+
+    $data = [
+        'cron_key'       => trim($_POST['cron_key'] ?? $existing['cron_key'] ?? generateKey()),
+        'api_key'        => trim($_POST['api_key']  ?? $existing['api_key']  ?? generateKey()),
+        'check_interval' => (int)($_POST['check_interval'] ?? 15),
+        'office_hours'   => [
+            'always_on' => ($_POST['always_on'] ?? '0') === '1',
+            'start'     => $_POST['oh_start']  ?? '09:00',
+            'end'       => $_POST['oh_end']    ?? '18:00',
+            'timezone'  => $_POST['timezone']  ?? 'Asia/Dhaka',
+        ],
+        'telegram' => [
+            'bot_token'  => trim($_POST['bot_token']  ?? $existing['telegram']['bot_token']  ?? ''),
+            'channel_id' => trim($_POST['channel_id'] ?? $existing['telegram']['channel_id'] ?? ''),
+        ],
+        'pages'       => $pages ?: ($existing['pages'] ?? []),
+        'last_check'  => $existing['last_check']  ?? null,
+        'last_result' => $existing['last_result'] ?? [],
+    ];
+
+    saveSettings($data);
+    header('Location: ' . ($_POST['redirect'] ?? 'index.php'));
+    exit;
+}
+
+function handleGetKeys(array $settings): void
+{
+    jsonResponse(['cron_key' => $settings['cron_key'] ?? '', 'api_key' => $settings['api_key'] ?? '']);
+}
+
 // ─── ROUTER ──────────────────────────────────────────────────
 
 $action   = $_GET['action'] ?? '';
