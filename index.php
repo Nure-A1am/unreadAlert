@@ -71,8 +71,8 @@ function httpGet(string $url): array
     $ch = curl_init($url);
     curl_setopt_array($ch, [
         CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT        => 15,
-        CURLOPT_SSL_VERIFYPEER => true,
+        CURLOPT_TIMEOUT        => 20,
+        CURLOPT_SSL_VERIFYPEER => false,
         CURLOPT_USERAGENT      => 'UnreadAlert/1.0',
     ]);
     $body  = curl_exec($ch);
@@ -106,34 +106,42 @@ function httpPost(string $url, array $payload): array
 
 // ─── META API ────────────────────────────────────────────────
 
-function fetchPageUnreadCount(string $pageId, string $token): int
+function fetchPageUnreadCount(string $pageId, string $token): array
 {
     $unread = 0;
     $url    = META_API_BASE . "/{$pageId}/conversations"
             . "?platform=messenger&fields=unread_count&limit=100"
             . "&access_token=" . urlencode($token);
 
+    $firstRes = null;
     while ($url) {
         $res = httpGet($url);
-        if ($res['error'] || $res['status'] !== 200 || empty($res['data']['data'])) break;
-        foreach ($res['data']['data'] as $conv) {
+        if ($firstRes === null) $firstRes = $res;
+        if ($res['error']) return ['unread' => 0, 'error' => 'cURL: ' . $res['error']];
+        if ($res['status'] !== 200) {
+            $msg = $res['data']['error']['message'] ?? ('HTTP ' . $res['status']);
+            return ['unread' => 0, 'error' => $msg];
+        }
+        foreach ($res['data']['data'] ?? [] as $conv) {
             $count = (int)($conv['unread_count'] ?? 0);
             if ($count > 0) $unread += $count;
         }
         $url = $res['data']['paging']['next'] ?? null;
     }
 
-    return $unread;
+    return ['unread' => $unread, 'error' => null];
 }
 
 function fetchAllPagesUnread(array $pages): array
 {
     $results = [];
     foreach ($pages as $page) {
+        $r = fetchPageUnreadCount($page['id'], $page['token']);
         $results[] = [
             'id'           => $page['id'],
             'name'         => $page['name'],
-            'unread_count' => fetchPageUnreadCount($page['id'], $page['token']),
+            'unread_count' => $r['unread'],
+            'error'        => $r['error'],
         ];
     }
     return $results;
@@ -318,7 +326,17 @@ function handleRun(array $settings): void
         jsonResponse(['ok' => true, 'message' => 'Outside office hours, skipped']);
     }
 
-    $results = fetchAllPagesUnread($settings['pages'] ?? []);
+    $pages = $settings['pages'] ?? [];
+    if (empty($pages)) {
+        jsonResponse(['ok' => false, 'message' => 'No pages configured. Add pages in Settings.']);
+    }
+
+    $results = fetchAllPagesUnread($pages);
+
+    $errors = array_filter(array_column($results, 'error'));
+    if (!empty($errors) && count($errors) === count($results)) {
+        jsonResponse(['ok' => false, 'message' => 'Facebook API error: ' . reset($errors), 'results' => $results]);
+    }
 
     $tz = $settings['office_hours']['timezone'] ?? 'Asia/Dhaka';
     $settings['last_result'] = $results;
