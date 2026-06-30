@@ -109,24 +109,28 @@ function httpPost(string $url, array $payload): array
 
 function fetchPageUnreadCount(string $pageId, string $token): array
 {
-    $unread = 0;
-    $url    = META_API_BASE . "/{$pageId}/conversations"
-            . "?platform=messenger&folder=inbox&fields=unread_count&limit=100"
-            . "&access_token=" . urlencode($token);
+    $unread  = 0;
+    $cutoff  = strtotime('-7 days');
+    $url     = META_API_BASE . "/{$pageId}/conversations"
+             . "?platform=messenger&fields=unread_count,updated_time&limit=100"
+             . "&access_token=" . urlencode($token);
 
-    $firstRes = null;
     while ($url) {
         $res = httpGet($url);
-        if ($firstRes === null) $firstRes = $res;
         if ($res['error']) return ['unread' => 0, 'error' => 'cURL: ' . $res['error']];
         if ($res['status'] !== 200) {
             $msg = $res['data']['error']['message'] ?? ('HTTP ' . $res['status']);
             return ['unread' => 0, 'error' => $msg];
         }
-        foreach ($res['data']['data'] ?? [] as $conv) {
-            // Count conversations, not messages — matches Business inbox unread counter
+        $convs = $res['data']['data'] ?? [];
+        $reachedOld = false;
+        foreach ($convs as $conv) {
+            $updatedTs = isset($conv['updated_time']) ? strtotime($conv['updated_time']) : 0;
+            if ($updatedTs < $cutoff) { $reachedOld = true; break; }
             if ((int)($conv['unread_count'] ?? 0) > 0) $unread++;
         }
+        // Stop paginating once we hit conversations older than 7 days
+        if ($reachedOld) break;
         $url = $res['data']['paging']['next'] ?? null;
     }
 
