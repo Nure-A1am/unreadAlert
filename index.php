@@ -11,12 +11,21 @@ define('TELEGRAM_API_BASE', 'https://api.telegram.org/bot');
 function loadSettings(): array
 {
     if (!file_exists(SETTINGS_FILE)) return [];
-    return json_decode(file_get_contents(SETTINGS_FILE), true) ?? [];
+    $json = file_get_contents(SETTINGS_FILE);
+    $data = json_decode($json, true);
+    if (json_last_error() !== JSON_ERROR_NONE) {
+        error_log('Unread Alert — settings.json parse error: ' . json_last_error_msg());
+        return [];
+    }
+    return $data ?? [];
 }
 
 function saveSettings(array $data): void
 {
-    file_put_contents(SETTINGS_FILE, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+    $result = file_put_contents(SETTINGS_FILE, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+    if ($result === false) {
+        throw new RuntimeException('Failed to write settings.json — check file permissions');
+    }
 }
 
 function isSetupDone(): bool
