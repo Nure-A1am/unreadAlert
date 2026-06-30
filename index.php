@@ -185,18 +185,31 @@ function buildTelegramMessage(array $results, string $timezone): string
     return implode("\n", $lines);
 }
 
-function sendTelegramMessage(string $botToken, string $channelId, string $text): array
+function sendTelegramMessage(string $botToken, string $chatId, string $text): array
 {
-    $res = httpPost(TELEGRAM_API_BASE . $botToken . '/sendMessage', [
-        'chat_id'                  => $channelId,
+    $url  = TELEGRAM_API_BASE . $botToken . '/sendMessage';
+    $data = [
+        'chat_id'                  => $chatId,
         'text'                     => $text,
         'parse_mode'               => 'HTML',
-        'disable_web_page_preview' => true,
-    ]);
+        'disable_web_page_preview' => 1,
+    ];
 
-    if ($res['error']) return ['ok' => false, 'message' => $res['error']];
-    if ($res['status'] !== 200) {
-        return ['ok' => false, 'message' => $res['data']['description'] ?? 'Telegram API error'];
+    $ch = curl_init();
+    curl_setopt($ch, CURLOPT_URL, $url);
+    curl_setopt($ch, CURLOPT_POST, true);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($data));
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 15);
+    $body  = curl_exec($ch);
+    $error = curl_error($ch);
+    curl_close($ch);
+
+    if ($error) return ['ok' => false, 'message' => $error];
+    $res = json_decode($body, true);
+    if (empty($res['ok'])) {
+        return ['ok' => false, 'message' => $res['description'] ?? 'Telegram API error'];
     }
     return ['ok' => true];
 }
@@ -218,7 +231,14 @@ function handleGetChatId(): void
     if (!$botToken) {
         jsonResponse(['ok' => false, 'message' => 'Bot token required'], 400);
     }
-    $res = httpGet(TELEGRAM_API_BASE . $botToken . '/getUpdates?limit=10&offset=-10');
+    $ch = curl_init(TELEGRAM_API_BASE . $botToken . '/getUpdates?limit=10&offset=-10');
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 15);
+    $body = curl_exec($ch);
+    curl_close($ch);
+    $res = ['status' => 200, 'data' => json_decode($body, true), 'error' => null];
+    if (!$body) $res['error'] = 'Connection failed';
     if ($res['error'] || $res['status'] !== 200) {
         jsonResponse(['ok' => false, 'message' => $res['data']['description'] ?? 'Failed to reach Telegram API']);
     }
@@ -455,7 +475,7 @@ input[name=check_interval]{display:none}
     <!-- Step 2: Telegram -->
     <div class="step" id="step2">
       <h2>📨 Telegram Setup</h2>
-      <p>Create a bot via <b>@BotFather</b>, then send any message to your bot to activate it.</p>
+      <p>Create a bot via <b>@BotFather</b>. Then open your bot in Telegram and send it <b>/start</b> or any message — then click "Get My Chat ID" below.</p>
       <div class="fg">
         <label>Bot Token</label>
         <input type="password" name="bot_token" id="botToken" placeholder="123456:ABC-DEF..." required>
@@ -463,7 +483,7 @@ input[name=check_interval]{display:none}
       <div class="fg">
         <label>Chat ID <small style="color:#64748b">(your Telegram user/group ID)</small></label>
         <div class="iw">
-          <input type="text" name="chat_id" id="channelId" placeholder="Click 'Get My Chat ID' →" required>
+          <input type="text" name="chat_id" id="channelId" placeholder="e.g. 123456789 (click Get My Chat ID)" required>
           <button type="button" class="btn btn-ghost btn-sm" onclick="getChatId()">Get My Chat ID</button>
         </div>
       </div>
