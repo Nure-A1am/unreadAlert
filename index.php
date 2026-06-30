@@ -644,6 +644,325 @@ upd();
     <?php
 }
 
+// ─── UI: SHARED ──────────────────────────────────────────────
+
+function sharedStyles(): string
+{
+    return '
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh;display:flex}
+.sidebar{width:220px;background:#020617;padding:24px 16px;flex-shrink:0;min-height:100vh}
+.slogo{font-size:16px;font-weight:700;color:#f8fafc;padding:8px 12px;margin-bottom:24px}
+.nav{display:flex;align-items:center;gap:8px;padding:10px 12px;border-radius:8px;color:#94a3b8;text-decoration:none;font-size:14px;margin-bottom:4px;transition:all .2s}
+.nav:hover,.nav.active{background:#1e293b;color:#f1f5f9}
+.content{flex:1;padding:32px;max-width:900px}
+h1{font-size:22px;font-weight:700;color:#f8fafc;margin-bottom:24px}
+.card{background:#1e293b;border-radius:12px;padding:24px;margin-bottom:20px;border:1px solid #334155}
+.ct{font-size:13px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:16px}
+.sr{display:flex;gap:16px;flex-wrap:wrap}
+.stat{background:#0f172a;border-radius:10px;padding:16px 20px;flex:1;min-width:130px}
+.sv{font-size:22px;font-weight:700;color:#f1f5f9}
+.sl{font-size:12px;color:#64748b;margin-top:4px}
+.badge{display:inline-block;padding:3px 10px;border-radius:99px;font-size:12px;font-weight:500}
+.bg{background:#14532d;color:#86efac}.by{background:#713f12;color:#fde68a}.br{background:#7f1d1d;color:#fca5a5}
+.btn{padding:10px 20px;border-radius:8px;border:none;font-size:14px;font-weight:500;cursor:pointer;transition:all .2s;text-decoration:none;display:inline-block}
+.btn-primary{background:#3b82f6;color:#fff}.btn-primary:hover{background:#2563eb}
+.btn-ghost{background:#334155;color:#cbd5e1}.btn-ghost:hover{background:#475569}
+.btn-success{background:#22c55e;color:#fff}
+.btn-row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:0}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th{text-align:left;padding:10px 12px;color:#64748b;font-size:12px;font-weight:600;text-transform:uppercase;border-bottom:1px solid #334155}
+td{padding:12px;border-bottom:1px solid #1e293b;color:#e2e8f0}
+tr:last-child td{border-bottom:none}
+.fg{margin-bottom:18px}
+label{display:block;font-size:13px;font-weight:500;color:#cbd5e1;margin-bottom:6px}
+input[type=text],input[type=password],select{width:100%;background:#0f172a;border:1px solid #334155;border-radius:8px;padding:10px 14px;color:#f1f5f9;font-size:14px;outline:none}
+input:focus,select:focus{border-color:#3b82f6}
+.iw{display:flex;gap:8px}
+.st{font-size:13px;padding:8px 12px;border-radius:6px;margin-top:8px;display:none}
+.st.success{background:#14532d;color:#86efac;display:block}
+.st.error{background:#7f1d1d;color:#fca5a5;display:block}
+.st.loading{background:#1e3a5f;color:#93c5fd;display:block}
+.pr{background:#0f172a;border-radius:10px;padding:14px;margin-bottom:12px;border:1px solid #334155}
+.prh{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.prt{font-size:13px;font-weight:600;color:#94a3b8}
+.btn-danger{background:#ef4444;color:#fff;border:none;border-radius:6px;padding:6px 12px;font-size:12px;cursor:pointer}
+.btn-sm{padding:6px 14px;font-size:12px}
+.tw{display:flex;gap:12px;margin-bottom:16px}
+.to{flex:1;background:#0f172a;border:2px solid #334155;border-radius:8px;padding:12px;cursor:pointer;text-align:center;transition:all .2s}
+.to.active{border-color:#3b82f6;background:#1e3a5f}
+.to span{display:block;font-size:13px;font-weight:600;color:#f1f5f9}
+.to small{color:#64748b;font-size:11px}
+.tg{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.is{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:0}
+.ib{background:#0f172a;border:2px solid #334155;color:#cbd5e1;border-radius:8px;padding:8px 16px;cursor:pointer;font-size:14px;transition:all .2s}
+.ib.active{border-color:#3b82f6;color:#f1f5f9;background:#1e3a5f}
+.cb{background:#0f172a;border:1px solid #334155;border-radius:8px;padding:14px 44px 14px 14px;font-family:monospace;font-size:13px;color:#86efac;position:relative;word-break:break-all}
+.cp{position:absolute;top:8px;right:8px;background:#334155;border:none;color:#cbd5e1;padding:4px 10px;border-radius:4px;font-size:11px;cursor:pointer}
+.cp:hover{background:#475569}
+input[name=check_interval]{display:none}
+</style>';
+}
+
+function renderLayout(string $activePage, callable $body): void
+{
+    $proto = isset($_SERVER['HTTPS']) ? 'https' : 'http';
+    $base  = $proto . '://' . $_SERVER['HTTP_HOST'] . $_SERVER['SCRIPT_NAME'];
+    echo '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">';
+    echo '<title>Unread Alert</title>';
+    echo sharedStyles();
+    echo '</head><body>';
+    echo '<div class="sidebar">';
+    echo '<div class="slogo">🔔 Unread Alert</div>';
+    echo '<a href="' . htmlspecialchars($base) . '" class="nav' . ($activePage === 'dashboard' ? ' active' : '') . '">📊 Dashboard</a>';
+    echo '<a href="' . htmlspecialchars($base) . '?view=settings" class="nav' . ($activePage === 'settings' ? ' active' : '') . '">⚙️ Settings</a>';
+    echo '</div><div class="content">';
+    $body($base);
+    echo '</div></body></html>';
+}
+
+// ─── UI: DASHBOARD ───────────────────────────────────────────
+
+function renderDashboard(array $s): void
+{
+    renderLayout('dashboard', function(string $base) use ($s) {
+        $results     = $s['last_result'] ?? [];
+        $totalUnread = array_sum(array_column($results, 'unread_count'));
+        $interval    = (int)($s['check_interval'] ?? 15);
+        $oh          = $s['office_hours'] ?? ['always_on' => true];
+        $active      = isWithinOfficeHours($oh);
+        $lastCheck   = $s['last_check'] ?? null;
+        $lastLabel   = $lastCheck ? (new DateTime($lastCheck))->format('Y-m-d h:i A') : 'Never';
+        $statusBadge = $active
+            ? '<span class="badge bg">✅ Active</span>'
+            : '<span class="badge by">⏸ Outside Office Hours</span>';
+        $cronKey = htmlspecialchars($s['cron_key'] ?? '');
+        ?>
+<h1>Dashboard</h1>
+<div class="card">
+  <div class="ct">System Status</div>
+  <div class="sr">
+    <div class="stat"><div class="sv"><?= $totalUnread ?></div><div class="sl">Total Unread Messages</div></div>
+    <div class="stat"><div class="sv"><?= count($s['pages'] ?? []) ?></div><div class="sl">Pages Monitored</div></div>
+    <div class="stat"><div class="sv"><?= $interval ?>m</div><div class="sl">Check Interval</div></div>
+    <div class="stat"><div class="sv"><?= $statusBadge ?></div><div class="sl">Notification Status</div></div>
+  </div>
+</div>
+<div class="card">
+  <div class="ct">Last Check: <?= htmlspecialchars($lastLabel) ?></div>
+  <div class="btn-row" style="margin-bottom:12px">
+    <button class="btn btn-primary" onclick="runNow()">▶ Run Now</button>
+    <a href="<?= htmlspecialchars($base) ?>?view=settings" class="btn btn-ghost">⚙️ Settings</a>
+  </div>
+  <div class="st" id="runSt"></div>
+</div>
+<?php if (!empty($results)): ?>
+<div class="card">
+  <div class="ct">Pages</div>
+  <table>
+    <thead><tr><th>Page</th><th>Unread</th><th>Inbox</th></tr></thead>
+    <tbody>
+    <?php foreach ($results as $p): ?>
+    <tr>
+      <td><?= htmlspecialchars($p['name']) ?></td>
+      <td><?= (int)$p['unread_count'] > 0 ? '<span class="badge br">' . (int)$p['unread_count'] . '</span>' : '<span class="badge bg">0</span>' ?></td>
+      <td><a href="https://business.facebook.com/latest/inbox/messenger?asset_id=<?= urlencode($p['id']) ?>" target="_blank" style="color:#3b82f6">Open Inbox ↗</a></td>
+    </tr>
+    <?php endforeach; ?>
+    </tbody>
+  </table>
+</div>
+<?php endif; ?>
+<script>
+function runNow() {
+  const st = document.getElementById('runSt');
+  st.className = 'st loading'; st.textContent = 'Running check...';
+  fetch('<?= htmlspecialchars($base) ?>?action=run&key=<?= $cronKey ?>')
+    .then(r => r.json())
+    .then(d => {
+      st.className = 'st ' + (d.ok ? 'success' : 'error');
+      st.textContent = d.ok ? '✅ ' + d.message : '❌ ' + d.message;
+      if (d.ok) setTimeout(() => location.reload(), 1500);
+    });
+}
+</script>
+        <?php
+    });
+}
+
+// ─── UI: SETTINGS PAGE ───────────────────────────────────────
+
+function renderSettingsPage(array $s): void
+{
+    renderLayout('settings', function(string $base) use ($s) {
+        $tg       = $s['telegram'] ?? [];
+        $oh       = $s['office_hours'] ?? ['always_on' => true, 'start' => '09:00', 'end' => '18:00', 'timezone' => 'Asia/Dhaka'];
+        $pages    = $s['pages'] ?? [];
+        $interval = (int)($s['check_interval'] ?? 15);
+        $alwaysOn = !empty($oh['always_on']);
+        $zones    = ['Asia/Dhaka','Asia/Kolkata','Asia/Karachi','Asia/Dubai','Europe/London','America/New_York','America/Los_Angeles','UTC'];
+        $cronCmd  = '*/' . $interval . ' * * * * curl "' . $base . '?action=run&key=' . ($s['cron_key'] ?? '') . '"';
+        $apiUrl   = $base . '?action=api&key=' . ($s['api_key'] ?? '');
+        ?>
+<h1>Settings</h1>
+<form method="POST" action="<?= htmlspecialchars($base) ?>?action=save">
+<input type="hidden" name="redirect" value="<?= htmlspecialchars($base) ?>?view=settings">
+
+<div class="card">
+  <div class="ct">Security Keys</div>
+  <div class="fg"><label>Cron Secret Key</label><input type="text" name="cron_key" value="<?= htmlspecialchars($s['cron_key'] ?? '') ?>"></div>
+  <div class="fg"><label>API Key</label><input type="text" name="api_key" value="<?= htmlspecialchars($s['api_key'] ?? '') ?>"></div>
+  <div class="fg">
+    <label>cPanel Cron Command</label>
+    <div class="cb" id="cronBox"><?= htmlspecialchars($cronCmd) ?><button type="button" class="cp" onclick="cp('cronBox')">Copy</button></div>
+  </div>
+  <div class="fg">
+    <label>REST API Endpoint</label>
+    <div class="cb" id="apiBox"><?= htmlspecialchars($apiUrl) ?><button type="button" class="cp" onclick="cp('apiBox')">Copy</button></div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="ct">Telegram</div>
+  <div class="fg"><label>Bot Token</label><input type="password" name="bot_token" value="<?= htmlspecialchars($tg['bot_token'] ?? '') ?>"></div>
+  <div class="fg"><label>Channel ID</label><input type="text" name="channel_id" id="chId" value="<?= htmlspecialchars($tg['channel_id'] ?? '') ?>"></div>
+  <button type="button" class="btn btn-ghost" onclick="testTg()">📤 Send Test Message</button>
+  <div class="st" id="tgSt"></div>
+</div>
+
+<div class="card">
+  <div class="ct">Facebook Pages</div>
+  <div id="pagesWrap">
+    <?php foreach ($pages as $i => $pg): $n = $i + 1; ?>
+    <div class="pr" id="pr<?= $n ?>">
+      <div class="prh"><span class="prt">Page #<?= $n ?></span>
+        <button type="button" class="btn-danger" onclick="rmPg(<?= $n ?>)">Remove</button></div>
+      <div class="fg"><label>Page Name</label><input type="text" name="page_name[]" value="<?= htmlspecialchars($pg['name']) ?>" required></div>
+      <div class="fg"><label>Page ID</label><div class="iw">
+        <input type="text" name="page_id[]" id="pid<?= $n ?>" value="<?= htmlspecialchars($pg['id']) ?>" required>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="verPg(<?= $n ?>)">Verify</button>
+      </div></div>
+      <div class="fg"><label>Page Access Token</label>
+        <input type="password" name="page_token[]" id="ptok<?= $n ?>" value="<?= htmlspecialchars($pg['token']) ?>" required></div>
+      <div class="st" id="pst<?= $n ?>"></div>
+    </div>
+    <?php endforeach; ?>
+  </div>
+  <button type="button" class="btn btn-ghost btn-sm" onclick="addPg()" style="margin-top:4px">+ Add Page</button>
+</div>
+
+<div class="card">
+  <div class="ct">Notification Settings</div>
+  <div class="fg">
+    <label>Check Interval</label>
+    <div class="is">
+      <?php foreach ([5,10,15,30,60] as $m): ?>
+      <button type="button" class="ib <?= $m === $interval ? 'active' : '' ?>" onclick="setInt(<?= $m ?>)"><?= $m ?> min</button>
+      <?php endforeach; ?>
+    </div>
+    <input type="hidden" name="check_interval" id="intVal" value="<?= $interval ?>">
+  </div>
+  <div class="fg">
+    <label>Notification Hours</label>
+    <div class="tw">
+      <div class="to <?= $alwaysOn ? 'active' : '' ?>" id="t24" onclick="setH('always')"><span>🌐 24/7 Always On</span><small>Notify any time</small></div>
+      <div class="to <?= !$alwaysOn ? 'active' : '' ?>" id="tCustom" onclick="setH('custom')"><span>🕐 Office Hours</span><small>Set a time range</small></div>
+    </div>
+    <input type="hidden" name="always_on" id="ao" value="<?= $alwaysOn ? '1' : '0' ?>">
+    <div id="ch" style="display:<?= $alwaysOn ? 'none' : 'block' ?>">
+      <div class="tg">
+        <div class="fg"><label>Start Time</label><input type="text" name="oh_start" value="<?= htmlspecialchars($oh['start'] ?? '09:00') ?>"></div>
+        <div class="fg"><label>End Time</label><input type="text" name="oh_end" value="<?= htmlspecialchars($oh['end'] ?? '18:00') ?>"></div>
+      </div>
+      <div class="fg"><label>Timezone</label>
+        <select name="timezone">
+          <?php foreach ($zones as $z): ?>
+          <option value="<?= $z ?>" <?= $z === ($oh['timezone'] ?? 'Asia/Dhaka') ? 'selected' : '' ?>><?= $z ?></option>
+          <?php endforeach; ?>
+        </select>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div style="margin-bottom:32px">
+  <button type="submit" class="btn btn-success">💾 Save Settings</button>
+  <a href="<?= htmlspecialchars($base) ?>" class="btn btn-ghost">Cancel</a>
+</div>
+</form>
+
+<script>
+const BASE = '<?= addslashes($base) ?>';
+let pc = <?= count($pages) ?>;
+
+function addPg() {
+  pc++;
+  const n = pc;
+  const d = document.createElement('div');
+  d.className = 'pr'; d.id = 'pr' + n;
+  d.innerHTML = `<div class="prh"><span class="prt">Page #${n}</span>
+    <button type="button" class="btn-danger" onclick="rmPg(${n})">Remove</button></div>
+    <div class="fg"><label>Page Name</label><input type="text" name="page_name[]" required></div>
+    <div class="fg"><label>Page ID</label><div class="iw">
+      <input type="text" name="page_id[]" id="pid${n}" required>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="verPg(${n})">Verify</button>
+    </div></div>
+    <div class="fg"><label>Page Access Token</label><input type="password" name="page_token[]" id="ptok${n}" required></div>
+    <div class="st" id="pst${n}"></div>`;
+  document.getElementById('pagesWrap').appendChild(d);
+}
+
+function rmPg(n) { document.getElementById('pr' + n)?.remove(); }
+
+function verPg(n) {
+  const st = document.getElementById('pst' + n);
+  st.className = 'st loading'; st.textContent = 'Verifying...';
+  const fd = new FormData();
+  fd.append('page_id', document.getElementById('pid' + n).value);
+  fd.append('token', document.getElementById('ptok' + n).value);
+  fetch(BASE + '?action=verify_page', { method: 'POST', body: fd })
+    .then(r => r.json())
+    .then(d => { st.className = 'st ' + (d.ok ? 'success' : 'error'); st.textContent = d.ok ? '✅ ' + d.name : '❌ ' + d.message; });
+}
+
+function testTg() {
+  const st = document.getElementById('tgSt');
+  st.className = 'st loading'; st.textContent = 'Sending...';
+  const fd = new FormData();
+  fd.append('bot_token', document.querySelector('[name=bot_token]').value);
+  fd.append('channel_id', document.getElementById('chId').value);
+  fetch(BASE + '?action=test_telegram', { method: 'POST', body: fd })
+    .then(r => r.json())
+    .then(d => { st.className = 'st ' + (d.ok ? 'success' : 'error'); st.textContent = d.ok ? '✅ Test message sent!' : '❌ ' + d.message; });
+}
+
+function setInt(v) {
+  document.getElementById('intVal').value = v;
+  document.querySelectorAll('.ib').forEach(b => b.classList.toggle('active', b.textContent.trim() === v + ' min'));
+}
+
+function setH(m) {
+  const a = m === 'always';
+  document.getElementById('ao').value = a ? '1' : '0';
+  document.getElementById('t24').classList.toggle('active', a);
+  document.getElementById('tCustom').classList.toggle('active', !a);
+  document.getElementById('ch').style.display = a ? 'none' : 'block';
+}
+
+function cp(id) {
+  const el = document.getElementById(id);
+  const txt = el.childNodes[0].textContent.trim();
+  navigator.clipboard.writeText(txt).then(() => {
+    const btn = el.querySelector('.cp'); btn.textContent = 'Copied!';
+    setTimeout(() => btn.textContent = 'Copy', 2000);
+  });
+}
+</script>
+        <?php
+    });
+}
+
 // ─── ROUTER ──────────────────────────────────────────────────
 
 $action   = $_GET['action'] ?? '';
