@@ -71,7 +71,7 @@ function httpGet(string $url): array
     $ch = curl_init($url);
     curl_setopt_array($ch, [
         CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT        => 20,
+        CURLOPT_TIMEOUT        => 8,
         CURLOPT_SSL_VERIFYPEER => false,
         CURLOPT_USERAGENT      => 'UnreadAlert/1.0',
     ]);
@@ -172,7 +172,7 @@ function fbCurl(string $url): array
     curl_setopt_array($ch, [
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_SSL_VERIFYPEER => false,
-        CURLOPT_TIMEOUT        => 20,
+        CURLOPT_TIMEOUT        => 8,
         CURLOPT_USERAGENT      => 'UnreadAlert/1.0',
     ]);
     $body  = curl_exec($ch);
