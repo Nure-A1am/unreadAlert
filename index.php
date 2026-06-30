@@ -328,6 +328,322 @@ function handleGetKeys(array $settings): void
     jsonResponse(['cron_key' => $settings['cron_key'] ?? '', 'api_key' => $settings['api_key'] ?? '']);
 }
 
+// ─── UI: SETUP WIZARD ────────────────────────────────────────
+
+function renderSetupWizard(): void
+{
+    $cronKey = generateKey();
+    $apiKey  = generateKey();
+    $proto   = isset($_SERVER['HTTPS']) ? 'https' : 'http';
+    $base    = $proto . '://' . $_SERVER['HTTP_HOST'] . $_SERVER['SCRIPT_NAME'];
+    $zones   = ['Asia/Dhaka','Asia/Kolkata','Asia/Karachi','Asia/Dubai','Europe/London','America/New_York','America/Los_Angeles','UTC'];
+    ?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Unread Alert — Setup</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+.wizard{background:#1e293b;border-radius:16px;width:100%;max-width:620px;overflow:hidden;box-shadow:0 25px 50px rgba(0,0,0,.5)}
+.wh{background:#0f172a;padding:24px}
+.wt{font-size:20px;font-weight:700;color:#f8fafc}
+.pb{margin-top:16px;background:#334155;border-radius:99px;height:6px}
+.pf{height:6px;border-radius:99px;background:#3b82f6;transition:width .3s}
+.sl{margin-top:8px;font-size:12px;color:#64748b}
+.wb{padding:28px}
+.step{display:none}.step.active{display:block}
+.step h2{font-size:18px;font-weight:600;color:#f1f5f9;margin-bottom:6px}
+.step p{font-size:14px;color:#94a3b8;margin-bottom:24px}
+.fg{margin-bottom:18px}
+label{display:block;font-size:13px;font-weight:500;color:#cbd5e1;margin-bottom:6px}
+.iw{display:flex;gap:8px}
+input[type=text],input[type=password],select{width:100%;background:#0f172a;border:1px solid #334155;border-radius:8px;padding:10px 14px;color:#f1f5f9;font-size:14px;outline:none;transition:border-color .2s}
+input:focus,select:focus{border-color:#3b82f6}
+.btn{padding:10px 18px;border-radius:8px;border:none;font-size:14px;font-weight:500;cursor:pointer;transition:all .2s;white-space:nowrap;text-decoration:none;display:inline-block}
+.btn-primary{background:#3b82f6;color:#fff}.btn-primary:hover{background:#2563eb}
+.btn-ghost{background:#334155;color:#cbd5e1}.btn-ghost:hover{background:#475569}
+.btn-success{background:#22c55e;color:#fff}
+.btn-danger{background:#ef4444;color:#fff;border:none;border-radius:6px;padding:6px 12px;font-size:12px;cursor:pointer}
+.btn-sm{padding:6px 14px;font-size:12px}
+.wf{display:flex;justify-content:space-between;align-items:center;padding:20px 28px;border-top:1px solid #334155}
+.pr{background:#0f172a;border-radius:10px;padding:14px;margin-bottom:12px;border:1px solid #334155}
+.prh{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.prt{font-size:13px;font-weight:600;color:#94a3b8}
+.tw{display:flex;gap:12px;margin-bottom:16px}
+.to{flex:1;background:#0f172a;border:2px solid #334155;border-radius:8px;padding:12px;cursor:pointer;text-align:center;transition:all .2s}
+.to.active{border-color:#3b82f6;background:#1e3a5f}
+.to span{display:block;font-size:13px;font-weight:600;color:#f1f5f9}
+.to small{color:#64748b;font-size:11px}
+.tg{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.st{font-size:13px;padding:8px 12px;border-radius:6px;margin-top:8px;display:none}
+.st.success{background:#14532d;color:#86efac;display:block}
+.st.error{background:#7f1d1d;color:#fca5a5;display:block}
+.st.loading{background:#1e3a5f;color:#93c5fd;display:block}
+.cb{background:#0f172a;border:1px solid #334155;border-radius:8px;padding:14px 44px 14px 14px;font-family:monospace;font-size:13px;color:#86efac;position:relative;word-break:break-all}
+.cp{position:absolute;top:8px;right:8px;background:#334155;border:none;color:#cbd5e1;padding:4px 10px;border-radius:4px;font-size:11px;cursor:pointer}
+.cp:hover{background:#475569}
+.di{font-size:48px;text-align:center;margin-bottom:16px}
+.is{display:flex;gap:8px;flex-wrap:wrap}
+.ib{background:#0f172a;border:2px solid #334155;color:#cbd5e1;border-radius:8px;padding:8px 16px;cursor:pointer;font-size:14px;transition:all .2s}
+.ib.active,.ib:hover{border-color:#3b82f6;color:#f1f5f9;background:#1e3a5f}
+input[name=check_interval]{display:none}
+</style>
+</head>
+<body>
+<div class="wizard">
+  <div class="wh">
+    <div class="wt">🔔 Unread Alert — First Time Setup</div>
+    <div class="pb"><div class="pf" id="pf" style="width:20%"></div></div>
+    <div class="sl" id="sl">Step 1 of 5 — Security</div>
+  </div>
+
+  <form method="POST" action="<?= htmlspecialchars($base) ?>?action=save" id="setupForm">
+  <input type="hidden" name="redirect" value="<?= htmlspecialchars($base) ?>">
+
+  <div class="wb">
+
+    <!-- Step 1: Security -->
+    <div class="step active" id="step1">
+      <h2>🔐 Security Setup</h2>
+      <p>These secret keys protect your cron trigger and API from unauthorized access.</p>
+      <div class="fg">
+        <label>Cron Secret Key</label>
+        <div class="iw">
+          <input type="text" name="cron_key" id="cronKey" value="<?= htmlspecialchars($cronKey) ?>" required>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="regen('cronKey')">Regenerate</button>
+        </div>
+      </div>
+      <div class="fg">
+        <label>API Key <small style="color:#64748b">(for third-party integrations)</small></label>
+        <div class="iw">
+          <input type="text" name="api_key" id="apiKey" value="<?= htmlspecialchars($apiKey) ?>">
+          <button type="button" class="btn btn-ghost btn-sm" onclick="regen('apiKey')">Regenerate</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 2: Telegram -->
+    <div class="step" id="step2">
+      <h2>📨 Telegram Setup</h2>
+      <p>Create a bot via <b>@BotFather</b> on Telegram, then add the bot to your channel as an admin.</p>
+      <div class="fg">
+        <label>Bot Token</label>
+        <input type="password" name="bot_token" id="botToken" placeholder="123456:ABC-DEF..." required>
+      </div>
+      <div class="fg">
+        <label>Channel ID</label>
+        <input type="text" name="channel_id" id="channelId" placeholder="@mychannel or -100xxxxxxxxx" required>
+      </div>
+      <button type="button" class="btn btn-ghost" onclick="testTelegram()">📤 Send Test Message</button>
+      <div class="st" id="tgSt"></div>
+    </div>
+
+    <!-- Step 3: Pages -->
+    <div class="step" id="step3">
+      <h2>📄 Facebook Pages</h2>
+      <p>Add all pages you want to monitor. Use a <b>Page Access Token</b> (not a user token).</p>
+      <div id="pagesWrap"></div>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="addPage()">+ Add Another Page</button>
+    </div>
+
+    <!-- Step 4: Settings -->
+    <div class="step" id="step4">
+      <h2>⚙️ Notification Settings</h2>
+      <p>Choose how often to check for unread messages and when notifications should be sent.</p>
+      <div class="fg">
+        <label>Check Interval</label>
+        <div class="is">
+          <?php foreach ([5,10,15,30,60] as $m): ?>
+          <button type="button" class="ib <?= $m===15?'active':'' ?>" onclick="setInt(<?= $m ?>)"><?= $m ?> min</button>
+          <?php endforeach; ?>
+        </div>
+        <input type="hidden" name="check_interval" id="intVal" value="15">
+      </div>
+      <div class="fg">
+        <label>Notification Hours</label>
+        <div class="tw">
+          <div class="to active" id="t24" onclick="setHours('always')"><span>🌐 24/7 Always On</span><small>Notify any time</small></div>
+          <div class="to" id="tCustom" onclick="setHours('custom')"><span>🕐 Office Hours</span><small>Set a time range</small></div>
+        </div>
+        <input type="hidden" name="always_on" id="alwaysOn" value="1">
+        <div id="customHours" style="display:none">
+          <div class="tg">
+            <div class="fg"><label>Start Time</label><input type="text" name="oh_start" value="09:00"></div>
+            <div class="fg"><label>End Time</label><input type="text" name="oh_end" value="18:00"></div>
+          </div>
+          <div class="fg">
+            <label>Timezone</label>
+            <select name="timezone">
+              <?php foreach ($zones as $z): ?>
+              <option value="<?= $z ?>" <?= $z==='Asia/Dhaka'?'selected':'' ?>><?= $z ?></option>
+              <?php endforeach; ?>
+            </select>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 5: Done -->
+    <div class="step" id="step5">
+      <div class="di">🎉</div>
+      <h2 style="text-align:center;margin-bottom:8px">Setup Complete!</h2>
+      <p style="text-align:center;margin-bottom:20px">Add this command to cPanel Cron Jobs:</p>
+      <div class="fg">
+        <label>cPanel Cron Command</label>
+        <div class="cb" id="cronCmd"> <button type="button" class="cp" onclick="copyEl('cronCmd')">Copy</button></div>
+      </div>
+      <div class="fg">
+        <label>REST API Endpoint</label>
+        <div class="cb" id="apiUrl"> <button type="button" class="cp" onclick="copyEl('apiUrl')">Copy</button></div>
+      </div>
+    </div>
+
+  </div><!-- wb -->
+
+  <div class="wf">
+    <button type="button" class="btn btn-ghost" id="prevBtn" onclick="go(-1)" style="visibility:hidden">← Back</button>
+    <button type="button" class="btn btn-primary" id="nextBtn" onclick="go(1)">Next →</button>
+    <a href="<?= htmlspecialchars($base) ?>" class="btn btn-success" id="doneBtn" style="display:none">Go to Dashboard →</a>
+  </div>
+  </form>
+</div>
+
+<script>
+const BASE = '<?= addslashes($base) ?>';
+let cur = 1;
+const names = ['Security','Telegram','Pages','Settings','Done'];
+let pc = 0;
+
+function regen(id) {
+  const a = new Uint8Array(16);
+  crypto.getRandomValues(a);
+  document.getElementById(id).value = Array.from(a, b => b.toString(16).padStart(2,'0')).join('');
+}
+
+function upd() {
+  document.getElementById('pf').style.width = (cur/5*100) + '%';
+  document.getElementById('sl').textContent = 'Step ' + cur + ' of 5 — ' + names[cur-1];
+  document.getElementById('prevBtn').style.visibility = cur > 1 ? 'visible' : 'hidden';
+  document.getElementById('nextBtn').style.display = cur < 5 ? 'inline-block' : 'none';
+  document.getElementById('doneBtn').style.display = cur === 5 ? 'inline-block' : 'none';
+  document.querySelectorAll('.step').forEach((s,i) => s.classList.toggle('active', i+1 === cur));
+}
+
+function go(dir) {
+  if (dir === 1 && cur === 2) {
+    const bt = document.getElementById('botToken').value.trim();
+    const ch = document.getElementById('channelId').value.trim();
+    if (!bt || !ch) { alert('Please fill in Bot Token and Channel ID'); return; }
+  }
+  if (dir === 1 && cur === 3 && document.querySelectorAll('.pr').length === 0) {
+    alert('Please add at least one Facebook Page'); return;
+  }
+  if (dir === 1 && cur === 4) {
+    const fd = new FormData(document.getElementById('setupForm'));
+    fetch(BASE + '?action=save', { method: 'POST', body: fd }).then(() => {
+      cur = 5; upd(); loadDone();
+    });
+    return;
+  }
+  cur = Math.min(Math.max(cur + dir, 1), 5);
+  upd();
+  if (cur === 3 && pc === 0) addPage();
+}
+
+function loadDone() {
+  fetch(BASE + '?action=getkeys')
+    .then(r => r.json())
+    .then(d => {
+      const iv = document.getElementById('intVal').value;
+      document.getElementById('cronCmd').childNodes[0].textContent =
+        '*/' + iv + ' * * * * curl "' + BASE + '?action=run&key=' + d.cron_key + '"';
+      document.getElementById('apiUrl').childNodes[0].textContent =
+        BASE + '?action=api&key=' + d.api_key;
+    });
+}
+
+function testTelegram() {
+  const st = document.getElementById('tgSt');
+  st.className = 'st loading'; st.textContent = 'Sending test message...';
+  const fd = new FormData();
+  fd.append('bot_token', document.getElementById('botToken').value);
+  fd.append('channel_id', document.getElementById('channelId').value);
+  fetch(BASE + '?action=test_telegram', { method: 'POST', body: fd })
+    .then(r => r.json())
+    .then(d => {
+      st.className = 'st ' + (d.ok ? 'success' : 'error');
+      st.textContent = d.ok ? '✅ Test message sent! Check your channel.' : '❌ ' + d.message;
+    });
+}
+
+function addPage() {
+  pc++;
+  const n = pc;
+  const div = document.createElement('div');
+  div.className = 'pr'; div.id = 'pr' + n;
+  div.innerHTML = `
+    <div class="prh"><span class="prt">Page #${n}</span>
+    <button type="button" class="btn-danger" onclick="rmPage(${n})">Remove</button></div>
+    <div class="fg"><label>Page Name</label><input type="text" name="page_name[]" placeholder="My Business Page" required></div>
+    <div class="fg"><label>Page ID</label><div class="iw">
+      <input type="text" name="page_id[]" id="pid${n}" placeholder="123456789012345" required>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="verPage(${n})">Verify</button>
+    </div></div>
+    <div class="fg"><label>Page Access Token</label>
+      <input type="password" name="page_token[]" id="ptok${n}" placeholder="EAAxxxxx..." required></div>
+    <div class="st" id="pst${n}"></div>`;
+  document.getElementById('pagesWrap').appendChild(div);
+}
+
+function rmPage(n) { document.getElementById('pr' + n)?.remove(); }
+
+function verPage(n) {
+  const st = document.getElementById('pst' + n);
+  st.className = 'st loading'; st.textContent = 'Verifying...';
+  const fd = new FormData();
+  fd.append('page_id', document.getElementById('pid' + n).value);
+  fd.append('token', document.getElementById('ptok' + n).value);
+  fetch(BASE + '?action=verify_page', { method: 'POST', body: fd })
+    .then(r => r.json())
+    .then(d => {
+      st.className = 'st ' + (d.ok ? 'success' : 'error');
+      st.textContent = d.ok ? '✅ Verified: ' + d.name : '❌ ' + d.message;
+    });
+}
+
+function setInt(v) {
+  document.getElementById('intVal').value = v;
+  document.querySelectorAll('.ib').forEach(b => b.classList.toggle('active', b.textContent.trim() === v + ' min'));
+}
+
+function setHours(m) {
+  const a = m === 'always';
+  document.getElementById('alwaysOn').value = a ? '1' : '0';
+  document.getElementById('t24').classList.toggle('active', a);
+  document.getElementById('tCustom').classList.toggle('active', !a);
+  document.getElementById('customHours').style.display = a ? 'none' : 'block';
+}
+
+function copyEl(id) {
+  const el = document.getElementById(id);
+  const txt = el.childNodes[0].textContent.trim();
+  navigator.clipboard.writeText(txt).then(() => {
+    const btn = el.querySelector('.cp');
+    btn.textContent = 'Copied!';
+    setTimeout(() => btn.textContent = 'Copy', 2000);
+  });
+}
+
+upd();
+</script>
+</body>
+</html>
+    <?php
+}
+
 // ─── ROUTER ──────────────────────────────────────────────────
 
 $action   = $_GET['action'] ?? '';
