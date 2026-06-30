@@ -641,15 +641,13 @@ function go(dir) {
 }
 
 function loadDone() {
-  fetch(BASE + '?action=getkeys')
-    .then(r => r.json())
-    .then(d => {
-      const iv = document.getElementById('intVal').value;
-      document.getElementById('cronCmd').childNodes[0].textContent =
-        '*/' + iv + ' * * * * curl "' + BASE + '?action=run&key=' + d.cron_key + '"';
-      document.getElementById('apiUrl').childNodes[0].textContent =
-        BASE + '?action=api&key=' + d.api_key;
-    });
+  const iv      = document.getElementById('intVal').value;
+  const cronKey = document.getElementById('cronKey').value;
+  const apiKey  = document.getElementById('apiKey').value;
+  document.getElementById('cronCmd').childNodes[0].textContent =
+    '*/' + iv + ' * * * * curl "' + BASE + '?action=run&key=' + cronKey + '"';
+  document.getElementById('apiUrl').childNodes[0].textContent =
+    BASE + '?action=api&key=' + apiKey;
 }
 
 function getChatId() {
