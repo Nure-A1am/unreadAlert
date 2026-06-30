@@ -149,6 +149,69 @@ function handleVerifyPage(): void
     jsonResponse(verifyPageToken($pageId, $token));
 }
 
+// ─── TELEGRAM ────────────────────────────────────────────────
+
+function buildTelegramMessage(array $results, string $timezone): string
+{
+    $tz    = new DateTimeZone($timezone ?: 'Asia/Dhaka');
+    $now   = new DateTime('now', $tz);
+    $time  = $now->format('Y-m-d h:i A');
+
+    $lines     = [];
+    $total     = 0;
+    $pageCount = 0;
+
+    $lines[] = "🔴 <b>Unread Message Alert</b>";
+    $lines[] = "🕐 {$time} ({$timezone})";
+    $lines[] = "━━━━━━━━━━━━━━━━━━━━";
+
+    foreach ($results as $page) {
+        if ((int)$page['unread_count'] <= 0) continue;
+        $pageCount++;
+        $total    += (int)$page['unread_count'];
+        $inboxUrl  = 'https://business.facebook.com/latest/inbox/messenger?asset_id=' . urlencode($page['id']);
+        $lines[]   = '';
+        $lines[]   = '📄 <b>' . htmlspecialchars($page['name']) . '</b>';
+        $lines[]   = '   💬 ' . $page['unread_count'] . ' unread messages';
+        $lines[]   = '   🔗 <a href="' . $inboxUrl . '">Open Inbox</a>';
+    }
+
+    if ($total === 0) return '';
+
+    $lines[] = '';
+    $lines[] = '━━━━━━━━━━━━━━━━━━━━';
+    $lines[] = '📊 Total: <b>' . $total . ' unread</b> across ' . $pageCount . ' ' . ($pageCount === 1 ? 'page' : 'pages');
+
+    return implode("\n", $lines);
+}
+
+function sendTelegramMessage(string $botToken, string $channelId, string $text): array
+{
+    $res = httpPost(TELEGRAM_API_BASE . $botToken . '/sendMessage', [
+        'chat_id'                  => $channelId,
+        'text'                     => $text,
+        'parse_mode'               => 'HTML',
+        'disable_web_page_preview' => true,
+    ]);
+
+    if ($res['error']) return ['ok' => false, 'message' => $res['error']];
+    if ($res['status'] !== 200) {
+        return ['ok' => false, 'message' => $res['data']['description'] ?? 'Telegram API error'];
+    }
+    return ['ok' => true];
+}
+
+function handleTestTelegram(): void
+{
+    $botToken  = trim($_POST['bot_token'] ?? '');
+    $channelId = trim($_POST['channel_id'] ?? '');
+    if (!$botToken || !$channelId) {
+        jsonResponse(['ok' => false, 'message' => 'Bot token and channel ID required'], 400);
+    }
+    $msg = "✅ <b>Unread Alert System</b>\n\nTelegram connection successful! Your alerts will appear here.";
+    jsonResponse(sendTelegramMessage($botToken, $channelId, $msg));
+}
+
 // ─── ROUTER ──────────────────────────────────────────────────
 
 $action   = $_GET['action'] ?? '';
