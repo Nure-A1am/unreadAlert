@@ -55,6 +55,100 @@ function jsonResponse(array $data, int $status = 200): void
     exit;
 }
 
+// ─── HTTP ────────────────────────────────────────────────────
+
+function httpGet(string $url): array
+{
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT        => 15,
+        CURLOPT_SSL_VERIFYPEER => true,
+        CURLOPT_USERAGENT      => 'UnreadAlert/1.0',
+    ]);
+    $body  = curl_exec($ch);
+    $code  = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $error = curl_error($ch);
+    curl_close($ch);
+
+    if ($error) return ['status' => 0, 'data' => null, 'error' => $error];
+    return ['status' => $code, 'data' => json_decode($body, true), 'error' => null];
+}
+
+function httpPost(string $url, array $payload): array
+{
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_POST           => true,
+        CURLOPT_POSTFIELDS     => json_encode($payload),
+        CURLOPT_HTTPHEADER     => ['Content-Type: application/json'],
+        CURLOPT_TIMEOUT        => 15,
+        CURLOPT_SSL_VERIFYPEER => true,
+    ]);
+    $body  = curl_exec($ch);
+    $code  = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $error = curl_error($ch);
+    curl_close($ch);
+
+    if ($error) return ['status' => 0, 'data' => null, 'error' => $error];
+    return ['status' => $code, 'data' => json_decode($body, true), 'error' => null];
+}
+
+// ─── META API ────────────────────────────────────────────────
+
+function fetchPageUnreadCount(string $pageId, string $token): int
+{
+    $unread = 0;
+    $url    = META_API_BASE . "/{$pageId}/conversations"
+            . "?platform=messenger&fields=unread_count&limit=100"
+            . "&access_token=" . urlencode($token);
+
+    while ($url) {
+        $res = httpGet($url);
+        if ($res['error'] || $res['status'] !== 200 || empty($res['data']['data'])) break;
+        foreach ($res['data']['data'] as $conv) {
+            $count = (int)($conv['unread_count'] ?? 0);
+            if ($count > 0) $unread += $count;
+        }
+        $url = $res['data']['paging']['next'] ?? null;
+    }
+
+    return $unread;
+}
+
+function fetchAllPagesUnread(array $pages): array
+{
+    $results = [];
+    foreach ($pages as $page) {
+        $results[] = [
+            'id'           => $page['id'],
+            'name'         => $page['name'],
+            'unread_count' => fetchPageUnreadCount($page['id'], $page['token']),
+        ];
+    }
+    return $results;
+}
+
+function verifyPageToken(string $pageId, string $token): array
+{
+    $res = httpGet(META_API_BASE . "/{$pageId}?fields=name&access_token=" . urlencode($token));
+    if ($res['error'] || $res['status'] !== 200 || empty($res['data']['name'])) {
+        return ['ok' => false, 'message' => $res['data']['error']['message'] ?? 'Invalid token or page ID'];
+    }
+    return ['ok' => true, 'name' => $res['data']['name']];
+}
+
+function handleVerifyPage(): void
+{
+    $pageId = trim($_POST['page_id'] ?? '');
+    $token  = trim($_POST['token'] ?? '');
+    if (!$pageId || !$token) {
+        jsonResponse(['ok' => false, 'message' => 'Page ID and token required'], 400);
+    }
+    jsonResponse(verifyPageToken($pageId, $token));
+}
+
 // ─── ROUTER ──────────────────────────────────────────────────
 
 $action   = $_GET['action'] ?? '';
