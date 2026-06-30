@@ -166,35 +166,64 @@ function handleVerifyPage(): void
     jsonResponse(verifyPageToken($pageId, $token));
 }
 
-function handleFetchPages(): void
+function fbCurl(string $url): array
 {
-    $userToken = trim($_POST['user_token'] ?? '');
-    if (!$userToken) {
-        jsonResponse(['ok' => false, 'message' => 'User access token required'], 400);
-    }
-    $url = META_API_BASE . '/me/accounts?fields=id,name,access_token&access_token=' . urlencode($userToken);
-    $ch  = curl_init($url);
+    $ch = curl_init($url);
     curl_setopt_array($ch, [
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_SSL_VERIFYPEER => false,
-        CURLOPT_TIMEOUT        => 15,
+        CURLOPT_TIMEOUT        => 20,
         CURLOPT_USERAGENT      => 'UnreadAlert/1.0',
     ]);
     $body  = curl_exec($ch);
     $error = curl_error($ch);
     curl_close($ch);
-    if ($error) {
-        jsonResponse(['ok' => false, 'message' => 'Connection failed: ' . $error]);
+    return ['body' => $body, 'error' => $error, 'data' => json_decode($body ?: '', true)];
+}
+
+function handleFetchPages(): void
+{
+    $appId     = trim($_POST['app_id']     ?? '');
+    $appSecret = trim($_POST['app_secret'] ?? '');
+    $userToken = trim($_POST['user_token'] ?? '');
+
+    if (!$userToken) {
+        jsonResponse(['ok' => false, 'message' => 'User Access Token required'], 400);
     }
-    $data = json_decode($body, true);
-    if (isset($data['error'])) {
-        jsonResponse(['ok' => false, 'message' => $data['error']['message'] ?? 'Facebook API error']);
+
+    // Exchange short-lived token → long-lived token (60 days) using App ID + Secret
+    if ($appId && $appSecret) {
+        $exchangeUrl = 'https://graph.facebook.com/oauth/access_token'
+            . '?grant_type=fb_exchange_token'
+            . '&client_id='          . urlencode($appId)
+            . '&client_secret='      . urlencode($appSecret)
+            . '&fb_exchange_token='  . urlencode($userToken);
+
+        $ex = fbCurl($exchangeUrl);
+        if ($ex['error']) {
+            jsonResponse(['ok' => false, 'message' => 'Token exchange failed: ' . $ex['error']]);
+        }
+        if (isset($ex['data']['error'])) {
+            jsonResponse(['ok' => false, 'message' => 'Token exchange failed: ' . ($ex['data']['error']['message'] ?? 'Unknown')]);
+        }
+        if (!empty($ex['data']['access_token'])) {
+            $userToken = $ex['data']['access_token']; // now long-lived
+        }
     }
-    $pages = $data['data'] ?? [];
+
+    // Fetch all pages — page tokens from long-lived user token are permanent
+    $res = fbCurl(META_API_BASE . '/me/accounts?fields=id,name,access_token&access_token=' . urlencode($userToken));
+    if ($res['error']) {
+        jsonResponse(['ok' => false, 'message' => 'Connection failed: ' . $res['error']]);
+    }
+    if (isset($res['data']['error'])) {
+        jsonResponse(['ok' => false, 'message' => $res['data']['error']['message'] ?? 'Facebook API error']);
+    }
+    $pages = $res['data']['data'] ?? [];
     if (empty($pages)) {
-        jsonResponse(['ok' => false, 'message' => 'No pages found. Make sure your token has pages_show_list permission and you have Page admin access.']);
+        jsonResponse(['ok' => false, 'message' => 'No pages found. Make sure you have admin access to at least one Facebook Page.']);
     }
-    jsonResponse(['ok' => true, 'pages' => $pages]);
+    jsonResponse(['ok' => true, 'pages' => $pages, 'token_exchanged' => ($appId && $appSecret)]);
 }
 
 // ─── TELEGRAM ────────────────────────────────────────────────
@@ -405,8 +434,10 @@ function handleSave(): void
     }
 
     $data = [
-        'cron_key'       => trim($_POST['cron_key'] ?? $existing['cron_key'] ?? generateKey()),
-        'api_key'        => trim($_POST['api_key']  ?? $existing['api_key']  ?? generateKey()),
+        'cron_key'       => trim($_POST['cron_key']    ?? $existing['cron_key']    ?? generateKey()),
+        'api_key'        => trim($_POST['api_key']     ?? $existing['api_key']     ?? generateKey()),
+        'fb_app_id'      => trim($_POST['fb_app_id']   ?? $existing['fb_app_id']   ?? ''),
+        'fb_app_secret'  => trim($_POST['fb_app_secret'] ?? $existing['fb_app_secret'] ?? ''),
         'check_interval' => (int)($_POST['check_interval'] ?? 15),
         'office_hours'   => [
             'always_on' => ($_POST['always_on'] ?? '0') === '1',
@@ -557,9 +588,17 @@ input[name=check_interval]{display:none}
     <!-- Step 3: Pages -->
     <div class="step" id="step3">
       <h2>📄 Facebook Pages</h2>
-      <p>Enter your <b>Facebook User Access Token</b> to auto-fetch all pages you manage, then select which to monitor.</p>
+      <p>App credentials দিয়ে auto-fetch করো — page tokens permanent হবে, আর expire করবে না।</p>
       <div class="fg">
-        <label>Facebook User Access Token</label>
+        <label>App ID</label>
+        <input type="text" id="fbAppId" name="fb_app_id" placeholder="123456789012345">
+      </div>
+      <div class="fg">
+        <label>App Secret</label>
+        <input type="password" id="fbAppSecret" name="fb_app_secret" placeholder="abcdef1234...">
+      </div>
+      <div class="fg">
+        <label>User Access Token <small style="color:#64748b">(Graph API Explorer → Generate → copy)</small></label>
         <div class="iw">
           <input type="password" id="userToken" placeholder="EAAxxxxx..." required>
           <button type="button" class="btn btn-primary btn-sm" onclick="fetchPages()">🔍 Fetch My Pages</button>
@@ -744,19 +783,24 @@ let fetchedPages = [];
 
 function fetchPages() {
   const st = document.getElementById('fetchSt');
-  const token = document.getElementById('userToken').value.trim();
-  if (!token) { alert('Please enter your Facebook User Access Token'); return; }
-  st.className = 'st loading'; st.textContent = 'Fetching your pages...';
+  const token   = document.getElementById('userToken').value.trim();
+  const appId   = (document.getElementById('fbAppId')     || {}).value?.trim() || '';
+  const appSec  = (document.getElementById('fbAppSecret') || {}).value?.trim() || '';
+  if (!token) { alert('Please enter your User Access Token'); return; }
+  st.className = 'st loading'; st.textContent = appId ? 'Exchanging token & fetching pages...' : 'Fetching your pages...';
   document.querySelectorAll('.hidden-page-inp').forEach(el => el.remove());
   const fd = new FormData();
   fd.append('user_token', token);
+  if (appId)  fd.append('app_id',     appId);
+  if (appSec) fd.append('app_secret', appSec);
   fetch(BASE + '?action=fetch_pages', { method: 'POST', body: fd })
     .then(r => r.json())
     .then(d => {
       if (!d.ok) { st.className = 'st error'; st.textContent = '❌ ' + d.message; return; }
       fetchedPages = d.pages;
       st.className = 'st success';
-      st.textContent = '✅ Found ' + d.pages.length + ' page(s). Select which to monitor, then click Next →';
+      const note = d.token_exchanged ? ' (Long-lived token — permanent ✅)' : '';
+      st.textContent = '✅ Found ' + d.pages.length + ' page(s)' + note + '. Select which to monitor, then click Next →';
       renderPageChecklist(d.pages);
     });
 }
@@ -1041,12 +1085,20 @@ function renderSettingsPage(array $s): void
 <div class="card">
   <div class="ct">Facebook Pages</div>
   <div style="background:#0f172a;border:1px solid #334155;border-radius:10px;padding:14px;margin-bottom:16px">
-    <div style="font-size:13px;font-weight:600;color:#94a3b8;margin-bottom:10px">Fetch Pages from Facebook</div>
+    <div style="font-size:13px;font-weight:600;color:#94a3b8;margin-bottom:10px">Add / Refresh Pages</div>
     <div class="fg" style="margin-bottom:10px">
-      <label>Facebook User Access Token</label>
+      <label>App ID</label>
+      <input type="text" id="fbAppId" name="fb_app_id" value="<?= htmlspecialchars($s['fb_app_id'] ?? '') ?>" placeholder="123456789012345">
+    </div>
+    <div class="fg" style="margin-bottom:10px">
+      <label>App Secret</label>
+      <input type="password" id="fbAppSecret" name="fb_app_secret" value="<?= htmlspecialchars($s['fb_app_secret'] ?? '') ?>" placeholder="abcdef1234...">
+    </div>
+    <div class="fg" style="margin-bottom:10px">
+      <label>User Access Token <small style="color:#64748b">(Graph API Explorer থেকে)</small></label>
       <div class="iw">
         <input type="password" id="userToken" placeholder="EAAxxxxx...">
-        <button type="button" class="btn btn-ghost btn-sm" onclick="fetchPages()">Fetch My Pages</button>
+        <button type="button" class="btn btn-primary btn-sm" onclick="fetchPages()">🔍 Fetch My Pages</button>
       </div>
     </div>
     <div class="st" id="fetchSt"></div>
@@ -1120,12 +1172,16 @@ function getExistingIds() {
 
 function fetchPages() {
   const st = document.getElementById('fetchSt');
-  const token = document.getElementById('userToken').value.trim();
-  if (!token) { alert('Please enter your Facebook User Access Token'); return; }
-  st.className = 'st loading'; st.textContent = 'Fetching your pages...';
+  const token  = document.getElementById('userToken').value.trim();
+  const appId  = (document.getElementById('fbAppId')     || {}).value?.trim() || '';
+  const appSec = (document.getElementById('fbAppSecret') || {}).value?.trim() || '';
+  if (!token) { alert('Please enter your User Access Token'); return; }
+  st.className = 'st loading'; st.textContent = appId ? 'Exchanging token & fetching pages...' : 'Fetching your pages...';
   document.querySelectorAll('.hidden-page-inp').forEach(el => el.remove());
   const fd = new FormData();
   fd.append('user_token', token);
+  if (appId)  fd.append('app_id',     appId);
+  if (appSec) fd.append('app_secret', appSec);
   fetch(BASE + '?action=fetch_pages', { method: 'POST', body: fd })
     .then(r => r.json())
     .then(d => {
@@ -1136,8 +1192,9 @@ function fetchPages() {
       if (newPages.length === 0) {
         st.className = 'st success'; st.textContent = '✅ All your pages are already added.'; return;
       }
+      const note = d.token_exchanged ? ' — permanent tokens ✅' : '';
       st.className = 'st success';
-      st.textContent = '✅ Found ' + newPages.length + ' new page(s). Select which to add, then Save Settings.';
+      st.textContent = '✅ Found ' + newPages.length + ' new page(s)' + note + '. Select to add, then Save Settings.';
       renderPageChecklist(newPages);
     });
 }
