@@ -203,13 +203,36 @@ function sendTelegramMessage(string $botToken, string $channelId, string $text):
 
 function handleTestTelegram(): void
 {
-    $botToken  = trim($_POST['bot_token'] ?? '');
-    $channelId = trim($_POST['channel_id'] ?? '');
-    if (!$botToken || !$channelId) {
-        jsonResponse(['ok' => false, 'message' => 'Bot token and channel ID required'], 400);
+    $botToken = trim($_POST['bot_token'] ?? '');
+    $chatId   = trim($_POST['chat_id'] ?? '');
+    if (!$botToken || !$chatId) {
+        jsonResponse(['ok' => false, 'message' => 'Bot token and chat ID required'], 400);
     }
     $msg = "✅ <b>Unread Alert System</b>\n\nTelegram connection successful! Your alerts will appear here.";
-    jsonResponse(sendTelegramMessage($botToken, $channelId, $msg));
+    jsonResponse(sendTelegramMessage($botToken, $chatId, $msg));
+}
+
+function handleGetChatId(): void
+{
+    $botToken = trim($_POST['bot_token'] ?? '');
+    if (!$botToken) {
+        jsonResponse(['ok' => false, 'message' => 'Bot token required'], 400);
+    }
+    $res = httpGet(TELEGRAM_API_BASE . $botToken . '/getUpdates?limit=10&offset=-10');
+    if ($res['error'] || $res['status'] !== 200) {
+        jsonResponse(['ok' => false, 'message' => $res['data']['description'] ?? 'Failed to reach Telegram API']);
+    }
+    $updates = $res['data']['result'] ?? [];
+    if (empty($updates)) {
+        jsonResponse(['ok' => false, 'message' => 'No messages found. Please send any message to your bot first, then try again.']);
+    }
+    $latest  = end($updates);
+    $chat    = $latest['message']['chat'] ?? $latest['callback_query']['message']['chat'] ?? null;
+    if (!$chat) {
+        jsonResponse(['ok' => false, 'message' => 'Could not detect chat. Send a message to your bot and retry.']);
+    }
+    $name = trim(($chat['first_name'] ?? '') . ' ' . ($chat['last_name'] ?? $chat['title'] ?? ''));
+    jsonResponse(['ok' => true, 'chat_id' => (string)$chat['id'], 'name' => $name]);
 }
 
 // ─── OFFICE HOURS ────────────────────────────────────────────
@@ -248,7 +271,7 @@ function handleRun(array $settings): void
     }
 
     $tg   = $settings['telegram'] ?? [];
-    $sent = sendTelegramMessage($tg['bot_token'] ?? '', $tg['channel_id'] ?? '', $message);
+    $sent = sendTelegramMessage($tg['bot_token'] ?? '', $tg['chat_id'] ?? '', $message);
     jsonResponse([
         'ok'      => $sent['ok'],
         'message' => $sent['ok'] ? 'Alert sent successfully' : $sent['message'],
@@ -310,8 +333,8 @@ function handleSave(): void
             'timezone'  => $_POST['timezone']  ?? 'Asia/Dhaka',
         ],
         'telegram' => [
-            'bot_token'  => trim($_POST['bot_token']  ?? $existing['telegram']['bot_token']  ?? ''),
-            'channel_id' => trim($_POST['channel_id'] ?? $existing['telegram']['channel_id'] ?? ''),
+            'bot_token' => trim($_POST['bot_token'] ?? $existing['telegram']['bot_token'] ?? ''),
+            'chat_id'   => trim($_POST['chat_id']   ?? $existing['telegram']['chat_id']   ?? $existing['telegram']['channel_id'] ?? ''),
         ],
         'pages'       => $pages ?: ($existing['pages'] ?? []),
         'last_check'  => $existing['last_check']  ?? null,
@@ -432,14 +455,17 @@ input[name=check_interval]{display:none}
     <!-- Step 2: Telegram -->
     <div class="step" id="step2">
       <h2>📨 Telegram Setup</h2>
-      <p>Create a bot via <b>@BotFather</b> on Telegram, then add the bot to your channel as an admin.</p>
+      <p>Create a bot via <b>@BotFather</b>, then send any message to your bot to activate it.</p>
       <div class="fg">
         <label>Bot Token</label>
         <input type="password" name="bot_token" id="botToken" placeholder="123456:ABC-DEF..." required>
       </div>
       <div class="fg">
-        <label>Channel ID</label>
-        <input type="text" name="channel_id" id="channelId" placeholder="@mychannel or -100xxxxxxxxx" required>
+        <label>Chat ID <small style="color:#64748b">(your Telegram user/group ID)</small></label>
+        <div class="iw">
+          <input type="text" name="chat_id" id="channelId" placeholder="Click 'Get My Chat ID' →" required>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="getChatId()">Get My Chat ID</button>
+        </div>
       </div>
       <button type="button" class="btn btn-ghost" onclick="testTelegram()">📤 Send Test Message</button>
       <div class="st" id="tgSt"></div>
@@ -569,17 +595,38 @@ function loadDone() {
     });
 }
 
+function getChatId() {
+  const st = document.getElementById('tgSt');
+  const bt = document.getElementById('botToken').value.trim();
+  if (!bt) { alert('Please enter your Bot Token first'); return; }
+  st.className = 'st loading'; st.textContent = 'Detecting your Chat ID...';
+  const fd = new FormData();
+  fd.append('bot_token', bt);
+  fetch(BASE + '?action=get_chat_id', { method: 'POST', body: fd })
+    .then(r => r.json())
+    .then(d => {
+      if (d.ok) {
+        document.getElementById('channelId').value = d.chat_id;
+        st.className = 'st success';
+        st.textContent = '✅ Chat ID detected: ' + d.chat_id + (d.name ? ' (' + d.name + ')' : '');
+      } else {
+        st.className = 'st error';
+        st.textContent = '❌ ' + d.message;
+      }
+    });
+}
+
 function testTelegram() {
   const st = document.getElementById('tgSt');
   st.className = 'st loading'; st.textContent = 'Sending test message...';
   const fd = new FormData();
   fd.append('bot_token', document.getElementById('botToken').value);
-  fd.append('channel_id', document.getElementById('channelId').value);
+  fd.append('chat_id', document.getElementById('channelId').value);
   fetch(BASE + '?action=test_telegram', { method: 'POST', body: fd })
     .then(r => r.json())
     .then(d => {
       st.className = 'st ' + (d.ok ? 'success' : 'error');
-      st.textContent = d.ok ? '✅ Test message sent! Check your channel.' : '❌ ' + d.message;
+      st.textContent = d.ok ? '✅ Test message sent! Check your bot chat.' : '❌ ' + d.message;
     });
 }
 
@@ -829,8 +876,13 @@ function renderSettingsPage(array $s): void
 
 <div class="card">
   <div class="ct">Telegram</div>
-  <div class="fg"><label>Bot Token</label><input type="password" name="bot_token" value="<?= htmlspecialchars($tg['bot_token'] ?? '') ?>"></div>
-  <div class="fg"><label>Channel ID</label><input type="text" name="channel_id" id="chId" value="<?= htmlspecialchars($tg['channel_id'] ?? '') ?>"></div>
+  <div class="fg"><label>Bot Token</label><input type="password" name="bot_token" id="settingsBotToken" value="<?= htmlspecialchars($tg['bot_token'] ?? '') ?>"></div>
+  <div class="fg"><label>Chat ID</label>
+    <div class="iw">
+      <input type="text" name="chat_id" id="chId" value="<?= htmlspecialchars($tg['chat_id'] ?? $tg['channel_id'] ?? '') ?>">
+      <button type="button" class="btn btn-ghost btn-sm" onclick="getChatId()">Get My Chat ID</button>
+    </div>
+  </div>
   <button type="button" class="btn btn-ghost" onclick="testTg()">📤 Send Test Message</button>
   <div class="st" id="tgSt"></div>
 </div>
@@ -930,12 +982,33 @@ function verPg(n) {
     .then(d => { st.className = 'st ' + (d.ok ? 'success' : 'error'); st.textContent = d.ok ? '✅ ' + d.name : '❌ ' + d.message; });
 }
 
+function getChatId() {
+  const st = document.getElementById('tgSt');
+  const bt = document.getElementById('settingsBotToken').value.trim();
+  if (!bt) { alert('Please enter your Bot Token first'); return; }
+  st.className = 'st loading'; st.style.display = 'block'; st.textContent = 'Detecting your Chat ID...';
+  const fd = new FormData();
+  fd.append('bot_token', bt);
+  fetch(BASE + '?action=get_chat_id', { method: 'POST', body: fd })
+    .then(r => r.json())
+    .then(d => {
+      if (d.ok) {
+        document.getElementById('chId').value = d.chat_id;
+        st.className = 'st success';
+        st.textContent = '✅ Chat ID detected: ' + d.chat_id + (d.name ? ' (' + d.name + ')' : '');
+      } else {
+        st.className = 'st error';
+        st.textContent = '❌ ' + d.message;
+      }
+    });
+}
+
 function testTg() {
   const st = document.getElementById('tgSt');
-  st.className = 'st loading'; st.textContent = 'Sending...';
+  st.className = 'st loading'; st.style.display = 'block'; st.textContent = 'Sending...';
   const fd = new FormData();
-  fd.append('bot_token', document.querySelector('[name=bot_token]').value);
-  fd.append('channel_id', document.getElementById('chId').value);
+  fd.append('bot_token', document.getElementById('settingsBotToken').value);
+  fd.append('chat_id', document.getElementById('chId').value);
   fetch(BASE + '?action=test_telegram', { method: 'POST', body: fd })
     .then(r => r.json())
     .then(d => { st.className = 'st ' + (d.ok ? 'success' : 'error'); st.textContent = d.ok ? '✅ Test message sent!' : '❌ ' + d.message; });
@@ -977,6 +1050,7 @@ switch ($action) {
     case 'api':           handleApi($settings);          break;
     case 'save':          handleSave();                  break;
     case 'test_telegram': handleTestTelegram();          break;
+    case 'get_chat_id':   handleGetChatId();             break;
     case 'verify_page':   handleVerifyPage();            break;
     case 'getkeys':       handleGetKeys($settings);      break;
     default:
