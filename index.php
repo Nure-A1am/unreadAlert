@@ -30,8 +30,17 @@ function saveSettings(array $data): void
 
 function isSetupDone(): bool
 {
-    $s = loadSettings();
-    return !empty($s['cron_key']) && !empty($s['telegram']['bot_token']) && !empty($s['pages']);
+    $s  = loadSettings();
+    $tg = $s['telegram'] ?? [];
+    $hasChatId = !empty($tg['chat_ids']) || !empty($tg['chat_id']);
+    return !empty($s['cron_key']) && !empty($tg['bot_token']) && $hasChatId && !empty($s['pages']);
+}
+
+function getChatIds(array $tg): array
+{
+    if (!empty($tg['chat_ids'])) return $tg['chat_ids'];
+    if (!empty($tg['chat_id']))  return [$tg['chat_id']];
+    return [];
 }
 
 // ─── SECURITY ────────────────────────────────────────────────
@@ -321,11 +330,15 @@ function handleRun(array $settings): void
         jsonResponse(['ok' => true, 'message' => 'No unread messages, notification skipped', 'results' => $results]);
     }
 
-    $tg   = $settings['telegram'] ?? [];
-    $sent = sendTelegramMessage($tg['bot_token'] ?? '', $tg['chat_id'] ?? '', $message);
+    $tg      = $settings['telegram'] ?? [];
+    $chatIds = getChatIds($tg);
+    $lastSent = ['ok' => false, 'message' => 'No chat IDs configured'];
+    foreach ($chatIds as $chatId) {
+        $lastSent = sendTelegramMessage($tg['bot_token'] ?? '', $chatId, $message);
+    }
     jsonResponse([
-        'ok'      => $sent['ok'],
-        'message' => $sent['ok'] ? 'Alert sent successfully' : $sent['message'],
+        'ok'      => $lastSent['ok'],
+        'message' => $lastSent['ok'] ? 'Alert sent to ' . count($chatIds) . ' recipient(s)' : $lastSent['message'],
         'results' => $results,
     ]);
 }
@@ -385,7 +398,7 @@ function handleSave(): void
         ],
         'telegram' => [
             'bot_token' => trim($_POST['bot_token'] ?? $existing['telegram']['bot_token'] ?? ''),
-            'chat_id'   => trim($_POST['chat_id']   ?? $existing['telegram']['chat_id']   ?? $existing['telegram']['channel_id'] ?? ''),
+            'chat_ids'  => array_values(array_filter(array_map('trim', (array)($_POST['chat_id'] ?? getChatIds($existing['telegram'] ?? []))))),
         ],
         'pages'       => $pages ?: ($existing['pages'] ?? []),
         'last_check'  => $existing['last_check']  ?? null,
@@ -506,16 +519,17 @@ input[name=check_interval]{display:none}
     <!-- Step 2: Telegram -->
     <div class="step" id="step2">
       <h2>📨 Telegram Setup</h2>
-      <p>Create a bot via <b>@BotFather</b>. Then open your bot in Telegram and send it <b>/start</b> or any message — then click "Get My Chat ID" below.</p>
+      <p>Create a bot via <b>@BotFather</b> and enter the token below. Then add each staff member who should receive alerts.</p>
       <div class="fg">
         <label>Bot Token</label>
         <input type="password" name="bot_token" id="botToken" placeholder="123456:ABC-DEF..." required>
       </div>
       <div class="fg">
-        <label>Chat ID <small style="color:#64748b">(your Telegram user/group ID)</small></label>
+        <label>Alert Recipients <small style="color:#64748b">— প্রতিটা staff bot এ /start পাঠাবে, তারপর নিচের বাটন চাপো</small></label>
+        <div id="chatIdList" style="margin-bottom:8px"></div>
         <div class="iw">
-          <input type="text" name="chat_id" id="channelId" placeholder="e.g. 123456789 (click Get My Chat ID)" required>
-          <button type="button" class="btn btn-ghost btn-sm" onclick="getChatId()">Get My Chat ID</button>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="getChatId()">🎯 Get My Chat ID</button>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="addChatIdManual()">+ Add Manually</button>
         </div>
       </div>
       <button type="button" class="btn btn-ghost" onclick="testTelegram()">📤 Send Test Message</button>
@@ -622,8 +636,9 @@ function upd() {
 function go(dir) {
   if (dir === 1 && cur === 2) {
     const bt = document.getElementById('botToken').value.trim();
-    const ch = document.getElementById('channelId').value.trim();
-    if (!bt || !ch) { alert('Please fill in Bot Token and Channel ID'); return; }
+    const ids = document.querySelectorAll('#chatIdList input[name="chat_id[]"]').length;
+    if (!bt) { alert('Please enter your Bot Token'); return; }
+    if (ids === 0) { alert('Please add at least one Chat ID (click "Get My Chat ID")'); return; }
   }
   if (dir === 1 && cur === 3) {
     const sel = document.querySelectorAll('#pageChecklist input[type=checkbox]:checked').length;
@@ -654,16 +669,18 @@ function getChatId() {
   const st = document.getElementById('tgSt');
   const bt = document.getElementById('botToken').value.trim();
   if (!bt) { alert('Please enter your Bot Token first'); return; }
-  st.className = 'st loading'; st.textContent = 'Detecting your Chat ID...';
+  st.className = 'st loading'; st.textContent = 'Detecting Chat ID...';
   const fd = new FormData();
   fd.append('bot_token', bt);
   fetch(BASE + '?action=get_chat_id', { method: 'POST', body: fd })
     .then(r => r.json())
     .then(d => {
       if (d.ok) {
-        document.getElementById('channelId').value = d.chat_id;
+        const added = addChatIdToList(d.chat_id, d.name);
         st.className = 'st success';
-        st.textContent = '✅ Chat ID detected: ' + d.chat_id + (d.name ? ' (' + d.name + ')' : '');
+        st.textContent = added
+          ? '✅ Added: ' + d.chat_id + (d.name ? ' (' + d.name + ')' : '') + ' — পরের জন: bot এ message পাঠিয়ে আবার click করো'
+          : 'ℹ️ ' + d.chat_id + ' already in the list';
       } else {
         st.className = 'st error';
         st.textContent = '❌ ' + d.message;
@@ -671,12 +688,32 @@ function getChatId() {
     });
 }
 
+function addChatIdToList(chatId, name) {
+  const list = document.getElementById('chatIdList');
+  const existing = Array.from(list.querySelectorAll('input[name="chat_id[]"]')).map(el => el.value);
+  if (existing.includes(chatId)) return false;
+  const div = document.createElement('div');
+  div.style.cssText = 'display:flex;align-items:center;gap:8px;padding:10px 12px;background:#0f172a;border:1px solid #334155;border-radius:8px;margin-bottom:6px';
+  div.innerHTML = '<input type="hidden" name="chat_id[]" value="' + escHtml(chatId) + '">' +
+    '<span style="flex:1;color:#f1f5f9">' + escHtml(chatId) + (name ? ' <small style="color:#64748b">(' + escHtml(name) + ')</small>' : '') + '</span>' +
+    '<button type="button" class="btn-danger" onclick="this.closest(\'div\').remove()">Remove</button>';
+  list.appendChild(div);
+  return true;
+}
+
+function addChatIdManual() {
+  const id = prompt('Enter Telegram Chat ID (numeric):');
+  if (id && id.trim()) addChatIdToList(id.trim(), '');
+}
+
 function testTelegram() {
   const st = document.getElementById('tgSt');
+  const firstId = document.querySelector('#chatIdList input[name="chat_id[]"]');
+  if (!firstId) { alert('Add at least one Chat ID first'); return; }
   st.className = 'st loading'; st.textContent = 'Sending test message...';
   const fd = new FormData();
   fd.append('bot_token', document.getElementById('botToken').value);
-  fd.append('chat_id', document.getElementById('channelId').value);
+  fd.append('chat_id', firstId.value);
   fetch(BASE + '?action=test_telegram', { method: 'POST', body: fd })
     .then(r => r.json())
     .then(d => {
@@ -933,6 +970,7 @@ function renderSettingsPage(array $s): void
 {
     renderLayout('settings', function(string $base) use ($s) {
         $tg       = $s['telegram'] ?? [];
+        $chatIds  = getChatIds($tg);
         $oh       = $s['office_hours'] ?? ['always_on' => true, 'start' => '09:00', 'end' => '18:00', 'timezone' => 'Asia/Dhaka'];
         $pages    = $s['pages'] ?? [];
         $interval = (int)($s['check_interval'] ?? 15);
@@ -962,10 +1000,20 @@ function renderSettingsPage(array $s): void
 <div class="card">
   <div class="ct">Telegram</div>
   <div class="fg"><label>Bot Token</label><input type="password" name="bot_token" id="settingsBotToken" value="<?= htmlspecialchars($tg['bot_token'] ?? '') ?>"></div>
-  <div class="fg"><label>Chat ID</label>
-    <div class="iw">
-      <input type="text" name="chat_id" id="chId" value="<?= htmlspecialchars($tg['chat_id'] ?? $tg['channel_id'] ?? '') ?>">
-      <button type="button" class="btn btn-ghost btn-sm" onclick="getChatId()">Get My Chat ID</button>
+  <div class="fg">
+    <label>Alert Recipients <small style="color:#64748b">— যারা notification পাবে</small></label>
+    <div id="chatIdList">
+      <?php foreach ($chatIds as $cid): ?>
+      <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;background:#0f172a;border:1px solid #334155;border-radius:8px;margin-bottom:6px">
+        <input type="hidden" name="chat_id[]" value="<?= htmlspecialchars($cid) ?>">
+        <span style="flex:1;color:#f1f5f9"><?= htmlspecialchars($cid) ?></span>
+        <button type="button" class="btn-danger" onclick="this.closest('div').remove()">Remove</button>
+      </div>
+      <?php endforeach; ?>
+    </div>
+    <div class="iw" style="margin-top:8px">
+      <button type="button" class="btn btn-ghost btn-sm" onclick="getChatId()">🎯 Get My Chat ID</button>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="addChatIdManual()">+ Add Manually</button>
     </div>
   </div>
   <button type="button" class="btn btn-ghost" onclick="testTg()">📤 Send Test Message</button>
@@ -1125,16 +1173,18 @@ function getChatId() {
   const st = document.getElementById('tgSt');
   const bt = document.getElementById('settingsBotToken').value.trim();
   if (!bt) { alert('Please enter your Bot Token first'); return; }
-  st.className = 'st loading'; st.style.display = 'block'; st.textContent = 'Detecting your Chat ID...';
+  st.className = 'st loading'; st.style.display = 'block'; st.textContent = 'Detecting Chat ID...';
   const fd = new FormData();
   fd.append('bot_token', bt);
   fetch(BASE + '?action=get_chat_id', { method: 'POST', body: fd })
     .then(r => r.json())
     .then(d => {
       if (d.ok) {
-        document.getElementById('chId').value = d.chat_id;
+        const added = addChatIdToList(d.chat_id, d.name);
         st.className = 'st success';
-        st.textContent = '✅ Chat ID detected: ' + d.chat_id + (d.name ? ' (' + d.name + ')' : '');
+        st.textContent = added
+          ? '✅ Added: ' + d.chat_id + (d.name ? ' (' + d.name + ')' : '') + ' — পরের জন: bot এ message পাঠিয়ে আবার click করো'
+          : 'ℹ️ ' + d.chat_id + ' already in the list';
       } else {
         st.className = 'st error';
         st.textContent = '❌ ' + d.message;
@@ -1142,12 +1192,32 @@ function getChatId() {
     });
 }
 
+function addChatIdToList(chatId, name) {
+  const list = document.getElementById('chatIdList');
+  const existing = Array.from(list.querySelectorAll('input[name="chat_id[]"]')).map(el => el.value);
+  if (existing.includes(chatId)) return false;
+  const div = document.createElement('div');
+  div.style.cssText = 'display:flex;align-items:center;gap:8px;padding:10px 12px;background:#0f172a;border:1px solid #334155;border-radius:8px;margin-bottom:6px';
+  div.innerHTML = '<input type="hidden" name="chat_id[]" value="' + escHtml(chatId) + '">' +
+    '<span style="flex:1;color:#f1f5f9">' + escHtml(chatId) + (name ? ' <small style="color:#64748b">(' + escHtml(name) + ')</small>' : '') + '</span>' +
+    '<button type="button" class="btn-danger" onclick="this.closest(\'div\').remove()">Remove</button>';
+  list.appendChild(div);
+  return true;
+}
+
+function addChatIdManual() {
+  const id = prompt('Enter Telegram Chat ID (numeric):');
+  if (id && id.trim()) addChatIdToList(id.trim(), '');
+}
+
 function testTg() {
   const st = document.getElementById('tgSt');
+  const firstId = document.querySelector('#chatIdList input[name="chat_id[]"]');
+  if (!firstId) { alert('Add at least one Chat ID first'); return; }
   st.className = 'st loading'; st.style.display = 'block'; st.textContent = 'Sending...';
   const fd = new FormData();
   fd.append('bot_token', document.getElementById('settingsBotToken').value);
-  fd.append('chat_id', document.getElementById('chId').value);
+  fd.append('chat_id', firstId.value);
   fetch(BASE + '?action=test_telegram', { method: 'POST', body: fd })
     .then(r => r.json())
     .then(d => { st.className = 'st ' + (d.ok ? 'success' : 'error'); st.textContent = d.ok ? '✅ Test message sent!' : '❌ ' + d.message; });
