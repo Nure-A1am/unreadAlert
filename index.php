@@ -346,6 +346,9 @@ function isWithinOfficeHours(array $oh): bool
 
 function handleRun(array $settings): void
 {
+    set_time_limit(300);
+    ignore_user_abort(true);
+
     if (!verifyKey($_GET['key'] ?? '', $settings['cron_key'] ?? '')) {
         jsonResponse(['ok' => false, 'message' => 'Unauthorized'], 401);
     }
@@ -1012,13 +1015,25 @@ function renderDashboard(array $s): void
 <script>
 function runNow() {
   const st = document.getElementById('runSt');
-  st.className = 'st loading'; st.textContent = 'Running check...';
+  const btn = document.querySelector('button[onclick="runNow()"]');
+  st.className = 'st loading'; st.textContent = 'Running check — please wait (up to 1 minute)...';
+  if (btn) btn.disabled = true;
+  let elapsed = 0;
+  const timer = setInterval(() => { elapsed++; st.textContent = 'Running check... (' + elapsed + 's)'; }, 1000);
   fetch('<?= htmlspecialchars($base) ?>?action=run&key=<?= $cronKey ?>')
     .then(r => r.json())
     .then(d => {
+      clearInterval(timer);
+      if (btn) btn.disabled = false;
       st.className = 'st ' + (d.ok ? 'success' : 'error');
       st.textContent = d.ok ? '✅ ' + d.message : '❌ ' + d.message;
-      if (d.ok) setTimeout(() => location.reload(), 1500);
+      if (d.ok) setTimeout(() => location.reload(), 2000);
+    })
+    .catch(() => {
+      clearInterval(timer);
+      if (btn) btn.disabled = false;
+      st.className = 'st error';
+      st.textContent = '❌ Request timed out. Check cron log or try again.';
     });
 }
 </script>
