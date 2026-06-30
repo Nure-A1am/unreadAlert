@@ -153,34 +153,6 @@ function handleFetchPages(): void
 {
     $userToken = trim($_POST['user_token'] ?? '');
     if (!$userToken) {
-        jsonResponse(['ok' => false, 'message' => 'User token required'], 400);
-    }
-    $url = META_API_BASE . '/me/accounts?fields=id,name,access_token&access_token=' . urlencode($userToken);
-    $ch  = curl_init($url);
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 30);
-    $body  = curl_exec($ch);
-    $error = curl_error($ch);
-    curl_close($ch);
-    if ($error || !$body) {
-        jsonResponse(['ok' => false, 'message' => 'Connection failed: ' . $error]);
-    }
-    $data = json_decode($body, true);
-    if (isset($data['error'])) {
-        jsonResponse(['ok' => false, 'message' => $data['error']['message'] ?? 'Facebook API error']);
-    }
-    $pages = $data['data'] ?? [];
-    if (empty($pages)) {
-        jsonResponse(['ok' => false, 'message' => 'No pages found. Make sure you are an admin of at least one Facebook Page.']);
-    }
-    jsonResponse(['ok' => true, 'pages' => $pages]);
-}
-
-function handleFetchPages(): void
-{
-    $userToken = trim($_POST['user_token'] ?? '');
-    if (!$userToken) {
         jsonResponse(['ok' => false, 'message' => 'User access token required'], 400);
     }
     $url = META_API_BASE . '/me/accounts?fields=id,name,access_token&access_token=' . urlencode($userToken);
