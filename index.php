@@ -149,6 +149,37 @@ function handleVerifyPage(): void
     jsonResponse(verifyPageToken($pageId, $token));
 }
 
+function handleFetchPages(): void
+{
+    $userToken = trim($_POST['user_token'] ?? '');
+    if (!$userToken) {
+        jsonResponse(['ok' => false, 'message' => 'User access token required'], 400);
+    }
+    $url = META_API_BASE . '/me/accounts?fields=id,name,access_token&access_token=' . urlencode($userToken);
+    $ch  = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_SSL_VERIFYPEER => false,
+        CURLOPT_TIMEOUT        => 15,
+        CURLOPT_USERAGENT      => 'UnreadAlert/1.0',
+    ]);
+    $body  = curl_exec($ch);
+    $error = curl_error($ch);
+    curl_close($ch);
+    if ($error) {
+        jsonResponse(['ok' => false, 'message' => 'Connection failed: ' . $error]);
+    }
+    $data = json_decode($body, true);
+    if (isset($data['error'])) {
+        jsonResponse(['ok' => false, 'message' => $data['error']['message'] ?? 'Facebook API error']);
+    }
+    $pages = $data['data'] ?? [];
+    if (empty($pages)) {
+        jsonResponse(['ok' => false, 'message' => 'No pages found. Make sure your token has pages_show_list permission and you have Page admin access.']);
+    }
+    jsonResponse(['ok' => true, 'pages' => $pages]);
+}
+
 // ─── TELEGRAM ────────────────────────────────────────────────
 
 function buildTelegramMessage(array $results, string $timezone): string
@@ -494,9 +525,17 @@ input[name=check_interval]{display:none}
     <!-- Step 3: Pages -->
     <div class="step" id="step3">
       <h2>📄 Facebook Pages</h2>
-      <p>Add all pages you want to monitor. Use a <b>Page Access Token</b> (not a user token).</p>
-      <div id="pagesWrap"></div>
-      <button type="button" class="btn btn-ghost btn-sm" onclick="addPage()">+ Add Another Page</button>
+      <p>Enter your <b>Facebook User Access Token</b> to automatically fetch all pages you manage.</p>
+      <div class="fg">
+        <label>Facebook User Access Token</label>
+        <div class="iw">
+          <input type="password" id="userToken" placeholder="EAAxxxxx...">
+          <button type="button" class="btn btn-ghost btn-sm" onclick="fetchPages()">Fetch My Pages</button>
+        </div>
+      </div>
+      <div class="st" id="fetchSt"></div>
+      <div id="pageChecklist" style="display:none;margin-top:12px"></div>
+      <div id="pagesWrap" style="margin-top:8px"></div>
     </div>
 
     <!-- Step 4: Settings -->
@@ -600,7 +639,6 @@ function go(dir) {
   }
   cur = Math.min(Math.max(cur + dir, 1), 5);
   upd();
-  if (cur === 3 && pc === 0) addPage();
 }
 
 function loadDone() {
@@ -650,39 +688,66 @@ function testTelegram() {
     });
 }
 
-function addPage() {
-  pc++;
-  const n = pc;
-  const div = document.createElement('div');
-  div.className = 'pr'; div.id = 'pr' + n;
-  div.innerHTML = `
-    <div class="prh"><span class="prt">Page #${n}</span>
-    <button type="button" class="btn-danger" onclick="rmPage(${n})">Remove</button></div>
-    <div class="fg"><label>Page Name</label><input type="text" name="page_name[]" placeholder="My Business Page" required></div>
-    <div class="fg"><label>Page ID</label><div class="iw">
-      <input type="text" name="page_id[]" id="pid${n}" placeholder="123456789012345" required>
-      <button type="button" class="btn btn-ghost btn-sm" onclick="verPage(${n})">Verify</button>
-    </div></div>
-    <div class="fg"><label>Page Access Token</label>
-      <input type="password" name="page_token[]" id="ptok${n}" placeholder="EAAxxxxx..." required></div>
-    <div class="st" id="pst${n}"></div>`;
-  document.getElementById('pagesWrap').appendChild(div);
+let fetchedPages = [];
+
+function fetchPages() {
+  const st = document.getElementById('fetchSt');
+  const token = document.getElementById('userToken').value.trim();
+  if (!token) { alert('Please enter your Facebook User Access Token'); return; }
+  st.className = 'st loading'; st.textContent = 'Fetching your pages...';
+  const fd = new FormData();
+  fd.append('user_token', token);
+  fetch(BASE + '?action=fetch_pages', { method: 'POST', body: fd })
+    .then(r => r.json())
+    .then(d => {
+      if (!d.ok) { st.className = 'st error'; st.textContent = '❌ ' + d.message; return; }
+      fetchedPages = d.pages;
+      st.className = 'st success';
+      st.textContent = '✅ Found ' + d.pages.length + ' page(s). Select which to monitor:';
+      renderPageChecklist(d.pages);
+    });
+}
+
+function renderPageChecklist(pages) {
+  const wrap = document.getElementById('pageChecklist');
+  wrap.style.display = 'block';
+  wrap.innerHTML = pages.map((p, i) => `
+    <label style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:#0f172a;border:1px solid #334155;border-radius:8px;margin-bottom:8px;cursor:pointer">
+      <input type="checkbox" id="chk${i}" value="${i}" checked style="width:16px;height:16px;accent-color:#3b82f6">
+      <div><div style="font-size:14px;font-weight:600;color:#f1f5f9">${escHtml(p.name)}</div>
+      <div style="font-size:12px;color:#64748b">ID: ${escHtml(p.id)}</div></div>
+    </label>`).join('') +
+    '<button type="button" class="btn btn-primary btn-sm" style="margin-top:4px" onclick="addSelectedPages()">✅ Add Selected Pages</button>';
+}
+
+function addSelectedPages() {
+  let added = 0;
+  fetchedPages.forEach((p, i) => {
+    if (!document.getElementById('chk' + i)?.checked) return;
+    pc++;
+    const n = pc;
+    const div = document.createElement('div');
+    div.className = 'pr'; div.id = 'pr' + n;
+    div.innerHTML = `<div class="prh"><span class="prt">${escHtml(p.name)}</span>
+      <button type="button" class="btn-danger" onclick="rmPage(${n})">Remove</button></div>
+      <input type="hidden" name="page_name[]" value="${escHtml(p.name)}">
+      <input type="hidden" name="page_id[]" value="${escHtml(p.id)}">
+      <input type="hidden" name="page_token[]" value="${escHtml(p.access_token)}">
+      <div style="font-size:12px;color:#64748b;padding:2px 0">ID: ${escHtml(p.id)}</div>`;
+    document.getElementById('pagesWrap').appendChild(div);
+    added++;
+  });
+  if (added === 0) { alert('Please select at least one page'); return; }
+  document.getElementById('pageChecklist').style.display = 'none';
+  const st = document.getElementById('fetchSt');
+  st.className = 'st success';
+  st.textContent = '✅ ' + added + ' page(s) added. Fetch again to add more, or click Next.';
 }
 
 function rmPage(n) { document.getElementById('pr' + n)?.remove(); }
 
-function verPage(n) {
-  const st = document.getElementById('pst' + n);
-  st.className = 'st loading'; st.textContent = 'Verifying...';
-  const fd = new FormData();
-  fd.append('page_id', document.getElementById('pid' + n).value);
-  fd.append('token', document.getElementById('ptok' + n).value);
-  fetch(BASE + '?action=verify_page', { method: 'POST', body: fd })
-    .then(r => r.json())
-    .then(d => {
-      st.className = 'st ' + (d.ok ? 'success' : 'error');
-      st.textContent = d.ok ? '✅ Verified: ' + d.name : '❌ ' + d.message;
-    });
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 function setInt(v) {
@@ -909,23 +974,30 @@ function renderSettingsPage(array $s): void
 
 <div class="card">
   <div class="ct">Facebook Pages</div>
+  <div style="background:#0f172a;border:1px solid #334155;border-radius:10px;padding:14px;margin-bottom:16px">
+    <div style="font-size:13px;font-weight:600;color:#94a3b8;margin-bottom:10px">Fetch Pages from Facebook</div>
+    <div class="fg" style="margin-bottom:10px">
+      <label>Facebook User Access Token</label>
+      <div class="iw">
+        <input type="password" id="userToken" placeholder="EAAxxxxx...">
+        <button type="button" class="btn btn-ghost btn-sm" onclick="fetchPages()">Fetch My Pages</button>
+      </div>
+    </div>
+    <div class="st" id="fetchSt"></div>
+    <div id="pageChecklist" style="display:none;margin-top:12px"></div>
+  </div>
   <div id="pagesWrap">
     <?php foreach ($pages as $i => $pg): $n = $i + 1; ?>
     <div class="pr" id="pr<?= $n ?>">
-      <div class="prh"><span class="prt">Page #<?= $n ?></span>
+      <div class="prh"><span class="prt"><?= htmlspecialchars($pg['name']) ?></span>
         <button type="button" class="btn-danger" onclick="rmPg(<?= $n ?>)">Remove</button></div>
-      <div class="fg"><label>Page Name</label><input type="text" name="page_name[]" value="<?= htmlspecialchars($pg['name']) ?>" required></div>
-      <div class="fg"><label>Page ID</label><div class="iw">
-        <input type="text" name="page_id[]" id="pid<?= $n ?>" value="<?= htmlspecialchars($pg['id']) ?>" required>
-        <button type="button" class="btn btn-ghost btn-sm" onclick="verPg(<?= $n ?>)">Verify</button>
-      </div></div>
-      <div class="fg"><label>Page Access Token</label>
-        <input type="password" name="page_token[]" id="ptok<?= $n ?>" value="<?= htmlspecialchars($pg['token']) ?>" required></div>
-      <div class="st" id="pst<?= $n ?>"></div>
+      <input type="hidden" name="page_name[]" value="<?= htmlspecialchars($pg['name']) ?>">
+      <input type="hidden" name="page_id[]" value="<?= htmlspecialchars($pg['id']) ?>">
+      <input type="hidden" name="page_token[]" value="<?= htmlspecialchars($pg['token']) ?>">
+      <div style="font-size:12px;color:#64748b;padding:2px 0">ID: <?= htmlspecialchars($pg['id']) ?></div>
     </div>
     <?php endforeach; ?>
   </div>
-  <button type="button" class="btn btn-ghost btn-sm" onclick="addPg()" style="margin-top:4px">+ Add Page</button>
 </div>
 
 <div class="card">
@@ -971,36 +1043,67 @@ function renderSettingsPage(array $s): void
 <script>
 const BASE = '<?= addslashes($base) ?>';
 let pc = <?= count($pages) ?>;
+let fetchedPages = [];
 
-function addPg() {
-  pc++;
-  const n = pc;
-  const d = document.createElement('div');
-  d.className = 'pr'; d.id = 'pr' + n;
-  d.innerHTML = `<div class="prh"><span class="prt">Page #${n}</span>
-    <button type="button" class="btn-danger" onclick="rmPg(${n})">Remove</button></div>
-    <div class="fg"><label>Page Name</label><input type="text" name="page_name[]" required></div>
-    <div class="fg"><label>Page ID</label><div class="iw">
-      <input type="text" name="page_id[]" id="pid${n}" required>
-      <button type="button" class="btn btn-ghost btn-sm" onclick="verPg(${n})">Verify</button>
-    </div></div>
-    <div class="fg"><label>Page Access Token</label><input type="password" name="page_token[]" id="ptok${n}" required></div>
-    <div class="st" id="pst${n}"></div>`;
-  document.getElementById('pagesWrap').appendChild(d);
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function fetchPages() {
+  const st = document.getElementById('fetchSt');
+  const token = document.getElementById('userToken').value.trim();
+  if (!token) { alert('Please enter your Facebook User Access Token'); return; }
+  st.className = 'st loading'; st.textContent = 'Fetching your pages...';
+  const fd = new FormData();
+  fd.append('user_token', token);
+  fetch(BASE + '?action=fetch_pages', { method: 'POST', body: fd })
+    .then(r => r.json())
+    .then(d => {
+      if (!d.ok) { st.className = 'st error'; st.textContent = '❌ ' + d.message; return; }
+      fetchedPages = d.pages;
+      st.className = 'st success';
+      st.textContent = '✅ Found ' + d.pages.length + ' page(s). Select which to add:';
+      renderPageChecklist(d.pages);
+    });
+}
+
+function renderPageChecklist(pages) {
+  const wrap = document.getElementById('pageChecklist');
+  wrap.style.display = 'block';
+  wrap.innerHTML = pages.map((p, i) => `
+    <label style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:#1e293b;border:1px solid #334155;border-radius:8px;margin-bottom:8px;cursor:pointer">
+      <input type="checkbox" id="chk${i}" value="${i}" checked style="width:16px;height:16px;accent-color:#3b82f6">
+      <div><div style="font-size:14px;font-weight:600;color:#f1f5f9">${escHtml(p.name)}</div>
+      <div style="font-size:12px;color:#64748b">ID: ${escHtml(p.id)}</div></div>
+    </label>`).join('') +
+    '<button type="button" class="btn btn-primary btn-sm" style="margin-top:4px" onclick="addSelectedPages()">✅ Add Selected Pages</button>';
+}
+
+function addSelectedPages() {
+  let added = 0;
+  fetchedPages.forEach((p, i) => {
+    if (!document.getElementById('chk' + i)?.checked) return;
+    pc++;
+    const n = pc;
+    const div = document.createElement('div');
+    div.className = 'pr'; div.id = 'pr' + n;
+    div.innerHTML = `<div class="prh"><span class="prt">${escHtml(p.name)}</span>
+      <button type="button" class="btn-danger" onclick="rmPg(${n})">Remove</button></div>
+      <input type="hidden" name="page_name[]" value="${escHtml(p.name)}">
+      <input type="hidden" name="page_id[]" value="${escHtml(p.id)}">
+      <input type="hidden" name="page_token[]" value="${escHtml(p.access_token)}">
+      <div style="font-size:12px;color:#64748b;padding:2px 0">ID: ${escHtml(p.id)}</div>`;
+    document.getElementById('pagesWrap').appendChild(div);
+    added++;
+  });
+  if (added === 0) { alert('Please select at least one page'); return; }
+  document.getElementById('pageChecklist').style.display = 'none';
+  const st = document.getElementById('fetchSt');
+  st.className = 'st success';
+  st.textContent = '✅ ' + added + ' page(s) added. Fetch again to add more.';
 }
 
 function rmPg(n) { document.getElementById('pr' + n)?.remove(); }
-
-function verPg(n) {
-  const st = document.getElementById('pst' + n);
-  st.className = 'st loading'; st.textContent = 'Verifying...';
-  const fd = new FormData();
-  fd.append('page_id', document.getElementById('pid' + n).value);
-  fd.append('token', document.getElementById('ptok' + n).value);
-  fetch(BASE + '?action=verify_page', { method: 'POST', body: fd })
-    .then(r => r.json())
-    .then(d => { st.className = 'st ' + (d.ok ? 'success' : 'error'); st.textContent = d.ok ? '✅ ' + d.name : '❌ ' + d.message; });
-}
 
 function getChatId() {
   const st = document.getElementById('tgSt');
@@ -1072,6 +1175,7 @@ switch ($action) {
     case 'test_telegram': handleTestTelegram();          break;
     case 'get_chat_id':   handleGetChatId();             break;
     case 'verify_page':   handleVerifyPage();            break;
+    case 'fetch_pages':   handleFetchPages();            break;
     case 'getkeys':       handleGetKeys($settings);      break;
     default:
         if (!isSetupDone()) {
