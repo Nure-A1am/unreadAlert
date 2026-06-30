@@ -153,6 +153,34 @@ function handleFetchPages(): void
 {
     $userToken = trim($_POST['user_token'] ?? '');
     if (!$userToken) {
+        jsonResponse(['ok' => false, 'message' => 'User token required'], 400);
+    }
+    $url = META_API_BASE . '/me/accounts?fields=id,name,access_token&access_token=' . urlencode($userToken);
+    $ch  = curl_init($url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+    $body  = curl_exec($ch);
+    $error = curl_error($ch);
+    curl_close($ch);
+    if ($error || !$body) {
+        jsonResponse(['ok' => false, 'message' => 'Connection failed: ' . $error]);
+    }
+    $data = json_decode($body, true);
+    if (isset($data['error'])) {
+        jsonResponse(['ok' => false, 'message' => $data['error']['message'] ?? 'Facebook API error']);
+    }
+    $pages = $data['data'] ?? [];
+    if (empty($pages)) {
+        jsonResponse(['ok' => false, 'message' => 'No pages found. Make sure you are an admin of at least one Facebook Page.']);
+    }
+    jsonResponse(['ok' => true, 'pages' => $pages]);
+}
+
+function handleFetchPages(): void
+{
+    $userToken = trim($_POST['user_token'] ?? '');
+    if (!$userToken) {
         jsonResponse(['ok' => false, 'message' => 'User access token required'], 400);
     }
     $url = META_API_BASE . '/me/accounts?fields=id,name,access_token&access_token=' . urlencode($userToken);
@@ -525,17 +553,16 @@ input[name=check_interval]{display:none}
     <!-- Step 3: Pages -->
     <div class="step" id="step3">
       <h2>📄 Facebook Pages</h2>
-      <p>Enter your <b>Facebook User Access Token</b> to automatically fetch all pages you manage.</p>
+      <p>Enter your <b>Facebook User Access Token</b> to auto-fetch all pages you manage, then select which to monitor.</p>
       <div class="fg">
         <label>Facebook User Access Token</label>
         <div class="iw">
-          <input type="password" id="userToken" placeholder="EAAxxxxx...">
-          <button type="button" class="btn btn-ghost btn-sm" onclick="fetchPages()">Fetch My Pages</button>
+          <input type="password" id="userToken" placeholder="EAAxxxxx..." required>
+          <button type="button" class="btn btn-primary btn-sm" onclick="fetchPages()">🔍 Fetch My Pages</button>
         </div>
       </div>
       <div class="st" id="fetchSt"></div>
       <div id="pageChecklist" style="display:none;margin-top:12px"></div>
-      <div id="pagesWrap" style="margin-top:8px"></div>
     </div>
 
     <!-- Step 4: Settings -->
@@ -604,7 +631,6 @@ input[name=check_interval]{display:none}
 const BASE = '<?= addslashes($base) ?>';
 let cur = 1;
 const names = ['Security','Telegram','Pages','Settings','Done'];
-let pc = 0;
 
 function regen(id) {
   const a = new Uint8Array(16);
@@ -627,8 +653,9 @@ function go(dir) {
     const ch = document.getElementById('channelId').value.trim();
     if (!bt || !ch) { alert('Please fill in Bot Token and Channel ID'); return; }
   }
-  if (dir === 1 && cur === 3 && document.querySelectorAll('.pr').length === 0) {
-    alert('Please add at least one Facebook Page'); return;
+  if (dir === 1 && cur === 3) {
+    const sel = document.querySelectorAll('#pageChecklist input[type=checkbox]:checked').length;
+    if (sel === 0) { alert('Please fetch your pages and select at least one to monitor'); return; }
   }
   if (dir === 1 && cur === 4) {
     const fd = new FormData(document.getElementById('setupForm'));
@@ -695,6 +722,7 @@ function fetchPages() {
   const token = document.getElementById('userToken').value.trim();
   if (!token) { alert('Please enter your Facebook User Access Token'); return; }
   st.className = 'st loading'; st.textContent = 'Fetching your pages...';
+  document.querySelectorAll('.hidden-page-inp').forEach(el => el.remove());
   const fd = new FormData();
   fd.append('user_token', token);
   fetch(BASE + '?action=fetch_pages', { method: 'POST', body: fd })
@@ -703,7 +731,7 @@ function fetchPages() {
       if (!d.ok) { st.className = 'st error'; st.textContent = '❌ ' + d.message; return; }
       fetchedPages = d.pages;
       st.className = 'st success';
-      st.textContent = '✅ Found ' + d.pages.length + ' page(s). Select which to monitor:';
+      st.textContent = '✅ Found ' + d.pages.length + ' page(s). Select which to monitor, then click Next →';
       renderPageChecklist(d.pages);
     });
 }
@@ -711,40 +739,42 @@ function fetchPages() {
 function renderPageChecklist(pages) {
   const wrap = document.getElementById('pageChecklist');
   wrap.style.display = 'block';
-  wrap.innerHTML = pages.map((p, i) => `
-    <label style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:#0f172a;border:1px solid #334155;border-radius:8px;margin-bottom:8px;cursor:pointer">
-      <input type="checkbox" id="chk${i}" value="${i}" checked style="width:16px;height:16px;accent-color:#3b82f6">
-      <div><div style="font-size:14px;font-weight:600;color:#f1f5f9">${escHtml(p.name)}</div>
-      <div style="font-size:12px;color:#64748b">ID: ${escHtml(p.id)}</div></div>
-    </label>`).join('') +
-    '<button type="button" class="btn btn-primary btn-sm" style="margin-top:4px" onclick="addSelectedPages()">✅ Add Selected Pages</button>';
+  wrap.innerHTML =
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">' +
+    '<span style="font-size:13px;font-weight:600;color:#94a3b8">' + pages.length + ' page(s) found</span>' +
+    '<div style="display:flex;gap:6px">' +
+    '<button type="button" class="btn btn-ghost btn-sm" onclick="selAllPages(true)">Select All</button>' +
+    '<button type="button" class="btn btn-ghost btn-sm" onclick="selAllPages(false)">None</button>' +
+    '</div></div>' +
+    pages.map((p, i) =>
+      '<label style="display:flex;align-items:center;gap:12px;padding:12px;background:#0f172a;border:1px solid #334155;border-radius:8px;margin-bottom:8px;cursor:pointer">' +
+      '<input type="checkbox" data-idx="' + i + '" checked onchange="syncPageInputs()" style="width:18px;height:18px;accent-color:#3b82f6;flex-shrink:0">' +
+      '<div><div style="font-weight:600;color:#f1f5f9">' + escHtml(p.name) + '</div>' +
+      '<div style="font-size:12px;color:#64748b;margin-top:2px">ID: ' + escHtml(p.id) + '</div></div>' +
+      '</label>'
+    ).join('');
+  syncPageInputs();
 }
 
-function addSelectedPages() {
-  let added = 0;
-  fetchedPages.forEach((p, i) => {
-    if (!document.getElementById('chk' + i)?.checked) return;
-    pc++;
-    const n = pc;
-    const div = document.createElement('div');
-    div.className = 'pr'; div.id = 'pr' + n;
-    div.innerHTML = `<div class="prh"><span class="prt">${escHtml(p.name)}</span>
-      <button type="button" class="btn-danger" onclick="rmPage(${n})">Remove</button></div>
-      <input type="hidden" name="page_name[]" value="${escHtml(p.name)}">
-      <input type="hidden" name="page_id[]" value="${escHtml(p.id)}">
-      <input type="hidden" name="page_token[]" value="${escHtml(p.access_token)}">
-      <div style="font-size:12px;color:#64748b;padding:2px 0">ID: ${escHtml(p.id)}</div>`;
-    document.getElementById('pagesWrap').appendChild(div);
-    added++;
+function syncPageInputs() {
+  document.querySelectorAll('.hidden-page-inp').forEach(el => el.remove());
+  const form = document.getElementById('setupForm');
+  document.querySelectorAll('#pageChecklist input[type=checkbox]').forEach(cb => {
+    if (!cb.checked) return;
+    const p = fetchedPages[parseInt(cb.dataset.idx)];
+    if (!p) return;
+    [['page_id[]', p.id], ['page_name[]', p.name], ['page_token[]', p.access_token]].forEach(([n, v]) => {
+      const inp = document.createElement('input');
+      inp.type = 'hidden'; inp.name = n; inp.value = v; inp.className = 'hidden-page-inp';
+      form.appendChild(inp);
+    });
   });
-  if (added === 0) { alert('Please select at least one page'); return; }
-  document.getElementById('pageChecklist').style.display = 'none';
-  const st = document.getElementById('fetchSt');
-  st.className = 'st success';
-  st.textContent = '✅ ' + added + ' page(s) added. Fetch again to add more, or click Next.';
 }
 
-function rmPage(n) { document.getElementById('pr' + n)?.remove(); }
+function selAllPages(checked) {
+  document.querySelectorAll('#pageChecklist input[type=checkbox]').forEach(cb => cb.checked = checked);
+  syncPageInputs();
+}
 
 function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -1042,11 +1072,14 @@ function renderSettingsPage(array $s): void
 
 <script>
 const BASE = '<?= addslashes($base) ?>';
-let pc = <?= count($pages) ?>;
 let fetchedPages = [];
 
 function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function getExistingIds() {
+  return Array.from(document.querySelectorAll('#pagesWrap input[name="page_id[]"]')).map(el => el.value);
 }
 
 function fetchPages() {
@@ -1054,6 +1087,7 @@ function fetchPages() {
   const token = document.getElementById('userToken').value.trim();
   if (!token) { alert('Please enter your Facebook User Access Token'); return; }
   st.className = 'st loading'; st.textContent = 'Fetching your pages...';
+  document.querySelectorAll('.hidden-page-inp').forEach(el => el.remove());
   const fd = new FormData();
   fd.append('user_token', token);
   fetch(BASE + '?action=fetch_pages', { method: 'POST', body: fd })
@@ -1061,46 +1095,58 @@ function fetchPages() {
     .then(d => {
       if (!d.ok) { st.className = 'st error'; st.textContent = '❌ ' + d.message; return; }
       fetchedPages = d.pages;
+      const existing = getExistingIds();
+      const newPages = d.pages.filter(p => !existing.includes(p.id));
+      if (newPages.length === 0) {
+        st.className = 'st success'; st.textContent = '✅ All your pages are already added.'; return;
+      }
       st.className = 'st success';
-      st.textContent = '✅ Found ' + d.pages.length + ' page(s). Select which to add:';
-      renderPageChecklist(d.pages);
+      st.textContent = '✅ Found ' + newPages.length + ' new page(s). Select which to add, then Save Settings.';
+      renderPageChecklist(newPages);
     });
 }
 
 function renderPageChecklist(pages) {
   const wrap = document.getElementById('pageChecklist');
   wrap.style.display = 'block';
-  wrap.innerHTML = pages.map((p, i) => `
-    <label style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:#1e293b;border:1px solid #334155;border-radius:8px;margin-bottom:8px;cursor:pointer">
-      <input type="checkbox" id="chk${i}" value="${i}" checked style="width:16px;height:16px;accent-color:#3b82f6">
-      <div><div style="font-size:14px;font-weight:600;color:#f1f5f9">${escHtml(p.name)}</div>
-      <div style="font-size:12px;color:#64748b">ID: ${escHtml(p.id)}</div></div>
-    </label>`).join('') +
-    '<button type="button" class="btn btn-primary btn-sm" style="margin-top:4px" onclick="addSelectedPages()">✅ Add Selected Pages</button>';
+  wrap.innerHTML =
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">' +
+    '<span style="font-size:13px;font-weight:600;color:#94a3b8">' + pages.length + ' new page(s) found</span>' +
+    '<div style="display:flex;gap:6px">' +
+    '<button type="button" class="btn btn-ghost btn-sm" onclick="selAllPages(true)">Select All</button>' +
+    '<button type="button" class="btn btn-ghost btn-sm" onclick="selAllPages(false)">None</button>' +
+    '</div></div>' +
+    pages.map((p, i) =>
+      '<label style="display:flex;align-items:center;gap:12px;padding:12px;background:#1e293b;border:1px solid #334155;border-radius:8px;margin-bottom:8px;cursor:pointer">' +
+      '<input type="checkbox" data-idx="' + i + '" checked onchange="syncPageInputs()" style="width:18px;height:18px;accent-color:#3b82f6;flex-shrink:0">' +
+      '<div><div style="font-weight:600;color:#f1f5f9">' + escHtml(p.name) + '</div>' +
+      '<div style="font-size:12px;color:#64748b;margin-top:2px">ID: ' + escHtml(p.id) + '</div></div>' +
+      '</label>'
+    ).join('');
+  // Store filtered list for syncPageInputs
+  wrap._pages = pages;
+  syncPageInputs();
 }
 
-function addSelectedPages() {
-  let added = 0;
-  fetchedPages.forEach((p, i) => {
-    if (!document.getElementById('chk' + i)?.checked) return;
-    pc++;
-    const n = pc;
-    const div = document.createElement('div');
-    div.className = 'pr'; div.id = 'pr' + n;
-    div.innerHTML = `<div class="prh"><span class="prt">${escHtml(p.name)}</span>
-      <button type="button" class="btn-danger" onclick="rmPg(${n})">Remove</button></div>
-      <input type="hidden" name="page_name[]" value="${escHtml(p.name)}">
-      <input type="hidden" name="page_id[]" value="${escHtml(p.id)}">
-      <input type="hidden" name="page_token[]" value="${escHtml(p.access_token)}">
-      <div style="font-size:12px;color:#64748b;padding:2px 0">ID: ${escHtml(p.id)}</div>`;
-    document.getElementById('pagesWrap').appendChild(div);
-    added++;
+function syncPageInputs() {
+  document.querySelectorAll('.hidden-page-inp').forEach(el => el.remove());
+  const form = document.querySelector('form');
+  const pages = document.getElementById('pageChecklist')._pages || [];
+  document.querySelectorAll('#pageChecklist input[type=checkbox]').forEach(cb => {
+    if (!cb.checked) return;
+    const p = pages[parseInt(cb.dataset.idx)];
+    if (!p) return;
+    [['page_id[]', p.id], ['page_name[]', p.name], ['page_token[]', p.access_token]].forEach(([n, v]) => {
+      const inp = document.createElement('input');
+      inp.type = 'hidden'; inp.name = n; inp.value = v; inp.className = 'hidden-page-inp';
+      form.appendChild(inp);
+    });
   });
-  if (added === 0) { alert('Please select at least one page'); return; }
-  document.getElementById('pageChecklist').style.display = 'none';
-  const st = document.getElementById('fetchSt');
-  st.className = 'st success';
-  st.textContent = '✅ ' + added + ' page(s) added. Fetch again to add more.';
+}
+
+function selAllPages(checked) {
+  document.querySelectorAll('#pageChecklist input[type=checkbox]').forEach(cb => cb.checked = checked);
+  syncPageInputs();
 }
 
 function rmPg(n) { document.getElementById('pr' + n)?.remove(); }
