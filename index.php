@@ -325,6 +325,10 @@ function handleSave(): void
 
 function handleGetKeys(array $settings): void
 {
+    // Only available during the setup wizard flow (before setup is complete)
+    if (isSetupDone()) {
+        jsonResponse(['status' => 'error', 'message' => 'Unauthorized'], 403);
+    }
     jsonResponse(['cron_key' => $settings['cron_key'] ?? '', 'api_key' => $settings['api_key'] ?? '']);
 }
 
